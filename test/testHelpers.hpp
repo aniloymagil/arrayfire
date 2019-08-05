@@ -12,7 +12,9 @@
 
 #include <arrayfire.h>
 #include <gtest/gtest.h>
+#include <half.hpp>
 #include <af/array.h>
+#include <af/defines.h>
 #include <af/dim4.hpp>
 #include <af/internal.h>
 #include <af/traits.hpp>
@@ -33,6 +35,23 @@
 #if defined(USE_MTX)
 #include <mmio.h>
 #endif
+
+bool operator==(const af_half &lhs, const af_half &rhs) {
+    return lhs.data_ == rhs.data_;
+}
+
+std::ostream &operator<<(std::ostream &os, const af_half &val) {
+    float out = *reinterpret_cast<const half_float::half *>(&val);
+    os << out;
+    return os;
+}
+
+namespace half_float {
+std::ostream &operator<<(std::ostream &os, half_float::half val) {
+    os << (float)val;
+    return os;
+}
+}  // namespace half_float
 
 #define UNUSED(expr) \
     do { (void)(expr); } while (0)
@@ -67,10 +86,21 @@ std::ostream &operator<<(std::ostream &os, af::dtype type) {
         case u64: name = "u64"; break;
         case s16: name = "s16"; break;
         case u16: name = "u16"; break;
+        case f16: name = "f16"; break;
         default: assert(false && "Invalid type");
     }
     return os << name;
 }
+
+namespace af {
+template<>
+struct dtype_traits<half_float::half> {
+    enum { af_type = f16, ctype = f16 };
+    typedef half_float::half base_type;
+    static const char *getName() { return "half"; }
+};
+
+}  // namespace af
 
 namespace {
 
@@ -90,6 +120,22 @@ std::string readNextNonEmptyLine(std::ifstream &file) {
         throw std::runtime_error("Non empty lines not found in the file");
     }
     return result;
+}
+
+template<typename To, typename Ti>
+To convert(Ti in) {
+    return static_cast<To>(in);
+}
+
+template<>
+float convert(af::half in) {
+    return static_cast<float>(half_float::half(in.data_));
+}
+
+template<>
+af_half convert(int in) {
+    half_float::half h = half_float::half(in);
+    return *reinterpret_cast<af_half*>(&h);
 }
 
 template<typename inType, typename outType, typename FileElementType>
@@ -119,7 +165,7 @@ void readTests(const std::string &FileName, std::vector<af::dim4> &inputDims,
             FileElementType tmp;
             for (unsigned i = 0; i < nElems; i++) {
                 testFile >> tmp;
-                testInputs[k][i] = static_cast<inType>(tmp);
+                testInputs[k][i] = convert<inType, FileElementType>(tmp);
             }
         }
 
@@ -129,7 +175,7 @@ void readTests(const std::string &FileName, std::vector<af::dim4> &inputDims,
             FileElementType tmp;
             for (unsigned j = 0; j < testSizes[i]; j++) {
                 testFile >> tmp;
-                testOutputs[i][j] = static_cast<outType>(tmp);
+                testOutputs[i][j] = convert<outType, FileElementType>(tmp);
             }
         }
     } else {
@@ -424,14 +470,13 @@ inline double imag<af::cfloat>(af::cfloat val) {
 
 template<class T>
 struct IsFloatingPoint {
-    static const bool value = is_same_type<float, T>::value ||
+    static const bool value = is_same_type<half_float::half, T>::value ||
+                              is_same_type<float, T>::value ||
                               is_same_type<double, T>::value ||
                               is_same_type<long double, T>::value;
 };
 
-template<typename T>
-bool noDoubleTests() {
-    af::dtype ty           = (af::dtype)af::dtype_traits<T>::af_type;
+bool noDoubleTests(af::dtype ty) {
     bool isTypeDouble      = (ty == f64) || (ty == c64);
     int dev                = af::getDevice();
     bool isDoubleSupported = af::isDoubleAvailable(dev);
@@ -439,8 +484,17 @@ bool noDoubleTests() {
     return ((isTypeDouble && !isDoubleSupported) ? true : false);
 }
 
-#define SUPPORTED_TYPE_CHECK(type) \
-    if (noDoubleTests<type>()) return;
+bool noHalfTests(af::dtype ty) {
+    bool isTypeHalf        = (ty == f16);
+    int dev                = af::getDevice();
+    bool isHalfSupported   = af::isHalfAvailable(dev);
+
+    return ((isTypeHalf && !isHalfSupported) ? true : false);
+}
+
+#define SUPPORTED_TYPE_CHECK(type)                                        \
+    if (noDoubleTests((af_dtype)af::dtype_traits<type>::af_type)) return; \
+    if (noHalfTests((af_dtype)af::dtype_traits<type>::af_type)) return
 
 inline bool noImageIOTests() {
     bool ret = !af::isImageIOAvailable();
@@ -496,7 +550,8 @@ af::array cpu_randu(const af::dim4 dims) {
     bool isTypeCplx = is_same_type<T, af::cfloat>::value ||
                       is_same_type<T, af::cdouble>::value;
     bool isTypeFloat =
-        is_same_type<BT, float>::value || is_same_type<BT, double>::value;
+      is_same_type<BT, float>::value || is_same_type<BT, double>::value ||
+      is_same_type<BT, half_float::half>::value;
 
     size_t elements = (isTypeCplx ? 2 : 1) * dims.elements();
 
@@ -532,10 +587,33 @@ void cleanSlate() {
 
 // Overloading unary + op is needed to make unsigned char values printable
 //  as numbers
+af_half abs(af_half in) {
+    half_float::half in_;
+    memcpy(&in_, &in, sizeof(af_half));
+    half_float::half out_ = abs(in_);
+    af_half out;
+    memcpy(&out, &out_, sizeof(af_half));
+    return out;
+}
+
+af_half operator-(af_half lhs, af_half rhs) {
+    half_float::half lhs_;
+    half_float::half rhs_;
+    memcpy(&lhs_, &lhs, sizeof(af_half));
+    memcpy(&rhs_, &rhs, sizeof(af_half));
+    half_float::half out = lhs_ - rhs_;
+    af_half o;
+    memcpy(&o, &out, sizeof(af_half));
+    return o;
+}
 
 const af::cfloat &operator+(const af::cfloat &val) { return val; }
 
 const af::cdouble &operator+(const af::cdouble &val) { return val; }
+
+const af_half& operator+(const af_half& val) {
+    return val;
+}
 
 // Calculate a multi-dimensional coordinates' linearized index
 dim_t ravelIdx(af::dim4 coords, af::dim4 strides) {
@@ -837,6 +915,9 @@ template<typename T>
             break;
         case u16:
             return elemWiseEq<unsigned short>(aName, bName, a, b, maxAbsDiff);
+            break;
+        case f16:
+            return elemWiseEq<af::half>(aName, bName, a, b, maxAbsDiff);
             break;
         default:
             return ::testing::AssertionFailure()
@@ -1143,6 +1224,15 @@ class TestOutputArrayInfo {
     TestOutputArrayType out_arr_type;
 
    public:
+    TestOutputArrayInfo()
+        : out_arr(0)
+        , out_arr_cpy(0)
+        , out_subarr(0)
+        , out_subarr_ndims(0)
+        , out_arr_type(NULL_ARRAY) {
+        for (uint i = 0; i < 4; ++i) { out_subarr_idxs[i] = af_span; }
+    }
+
     TestOutputArrayInfo(TestOutputArrayType arr_type)
         : out_arr(0)
         , out_arr_cpy(0)

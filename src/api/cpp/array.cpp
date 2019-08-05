@@ -6,18 +6,22 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+
+#include <af/array.h>
+
 #include <af/algorithm.h>
 #include <af/arith.h>
-#include <af/array.h>
 #include <af/blas.h>
 #include <af/data.h>
 #include <af/device.h>
 #include <af/gfor.h>
+#include <af/half.h>
 #include <af/index.h>
 #include <af/internal.h>
 #include <af/traits.hpp>
 #include <af/util.h>
 #include "error.hpp"
+#include "half.hpp"  //note: NOT common. From extern/half/include/half.hpp
 
 #include <memory>
 #include <stdexcept>
@@ -148,6 +152,15 @@ array::array(const af_array handle) : arr(handle) {}
 
 array::array() : arr(nullptr) { initEmptyArray(&arr, f32, 0, 1, 1, 1); }
 
+array::array(array &&other) noexcept : arr(other.arr) { other.arr = 0; }
+
+array &array::operator=(array &&other)  noexcept {
+    af_release_array(arr);
+    arr       = other.arr;
+    other.arr = 0;
+    return *this;
+}
+
 array::array(const dim4 &dims, af::dtype ty) : arr(nullptr) {
     initEmptyArray(&arr, ty, dims[0], dims[1], dims[2], dims[3]);
 }
@@ -168,6 +181,13 @@ array::array(dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3, af::dtype ty)
     : arr(nullptr) {
     initEmptyArray(&arr, ty, dim0, dim1, dim2, dim3);
 }
+
+template<>
+struct dtype_traits<half_float::half> {
+    enum { af_type = f16, ctype = f16 };
+    typedef half base_type;
+    static const char *getName() { return "half"; }
+};
 
 #define INSTANTIATE(T)                                                         \
     template<>                                                                 \
@@ -215,6 +235,8 @@ INSTANTIATE(long long)
 INSTANTIATE(unsigned long long)
 INSTANTIATE(short)
 INSTANTIATE(unsigned short)
+INSTANTIATE(af_half)
+INSTANTIATE(half_float::half)
 
 #undef INSTANTIATE
 
@@ -283,6 +305,7 @@ INSTANTIATE(column)
 INSTANTIATE(complex)
 INSTANTIATE(double)
 INSTANTIATE(single)
+INSTANTIATE(half)
 INSTANTIATE(realfloating)
 INSTANTIATE(floating)
 INSTANTIATE(integer)
@@ -457,25 +480,40 @@ array::array_proxy &af::array::array_proxy::operator=(const array &other) {
         }
     }
 
-    af_array par_arr = nullptr;
+    af_array par_arr = 0;
 
+    dim4 parent_dims = impl->parent_->dims();
     if (impl->is_linear_) {
         AF_THROW(af_flat(&par_arr, impl->parent_->get()));
+        // The set call will dereference the impl->parent_ array. We are doing
+        // this because the af_flat call above increases the reference count of
+        // the parent array which triggers a copy operation. This triggers a
+        // copy operation inside the af_assign_gen function below. The parent
+        // array will be reverted to the original array and shape later in the
+        // code.
+        af_array empty = 0;
+        impl->parent_->set(empty);
         nd = 1;
     } else {
         par_arr = impl->parent_->get();
     }
 
-    af_array tmp = nullptr;
-    AF_THROW(af_assign_gen(&tmp, par_arr, nd, impl->indices_, other_arr));
+    af_array flat_res = 0;
+    AF_THROW(af_assign_gen(&flat_res, par_arr, nd, impl->indices_, other_arr));
 
-    af_array res = nullptr;
+    af_array res         = 0;
+    af_array unflattened = 0;
     if (impl->is_linear_) {
-        AF_THROW(af_moddims(&res, tmp, this_dims.ndims(), this_dims.get()));
+        AF_THROW(
+            af_moddims(&res, flat_res, this_dims.ndims(), this_dims.get()));
+        // Unflatten the af_array and reset the original reference
+        AF_THROW(af_moddims(&unflattened, par_arr, parent_dims.ndims(),
+                            parent_dims.get()));
+        impl->parent_->set(unflattened);
         AF_THROW(af_release_array(par_arr));
-        AF_THROW(af_release_array(tmp));
+        AF_THROW(af_release_array(flat_res));
     } else {
-        res = tmp;
+        res = flat_res;
     }
 
     impl->parent_->set(res);
@@ -500,21 +538,16 @@ af::array::array_proxy::array_proxy(const array_proxy &other)
     : impl(new array_proxy_impl(*other.impl->parent_, other.impl->indices_,
                                 other.impl->is_linear_)) {}
 
-#if __cplusplus > 199711L
 af::array::array_proxy::array_proxy(array_proxy &&other) {
-   impl = other.impl;
-   other.impl = nullptr;
+    impl       = other.impl;
+    other.impl = nullptr;
 }
 
 array::array_proxy &af::array::array_proxy::operator=(array_proxy &&other) {
-    if (&other == this)
-        return *this;
-    delete this->impl;
-    impl = other.impl;
-    other.impl = nullptr;
+    array out = other;
+    *this     = out;
     return *this;
 }
-#endif
 
 af::array::array_proxy::~array_proxy() { delete impl; }
 
@@ -556,6 +589,7 @@ MEM_FUNC(bool, iscolumn)
 MEM_FUNC(bool, iscomplex)
 MEM_FUNC(bool, isdouble)
 MEM_FUNC(bool, issingle)
+MEM_FUNC(bool, ishalf)
 MEM_FUNC(bool, isrealfloating)
 MEM_FUNC(bool, isfloating)
 MEM_FUNC(bool, isinteger)
@@ -927,6 +961,8 @@ INSTANTIATE(long long)
 INSTANTIATE(unsigned long long)
 INSTANTIATE(short)
 INSTANTIATE(unsigned short)
+INSTANTIATE(af_half)
+INSTANTIATE(half_float::half)
 
 template<>
 AFAPI void array::write(const void *ptr, const size_t bytes, af::source src) {
@@ -967,6 +1003,8 @@ INSTANTIATE(long long)
 INSTANTIATE(unsigned long long)
 INSTANTIATE(short)
 INSTANTIATE(unsigned short)
+INSTANTIATE(af_half)
+INSTANTIATE(half_float::half)
 
 #undef INSTANTIATE
 #undef TEMPLATE_MEM_FUNC

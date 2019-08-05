@@ -30,7 +30,7 @@ endfunction()
 
 function(arrayfire_get_cuda_cxx_flags cuda_flags)
   if(NOT MSVC)
-    set(flags "-std=c++11 -Xcompiler -fPIC -Xcompiler ${CMAKE_CXX_COMPILE_OPTIONS_VISIBILITY}hidden")
+    set(flags "-std=c++14 --expt-relaxed-constexpr -Xcompiler -fPIC -Xcompiler ${CMAKE_CXX_COMPILE_OPTIONS_VISIBILITY}hidden")
   else()
     set(flags "-Xcompiler /wd4251 -Xcompiler /wd4068 -Xcompiler /wd4275 -Xcompiler /bigobj -Xcompiler /EHsc")
     if(CMAKE_GENERATOR MATCHES "Ninja")
@@ -104,7 +104,7 @@ macro(arrayfire_set_cmake_default_variables)
   set(CMAKE_PREFIX_PATH "${ArrayFire_BINARY_DIR};${CMAKE_PREFIX_PATH}")
   set(BUILD_SHARED_LIBS ON)
 
-  set(CMAKE_CXX_STANDARD 11)
+  set(CMAKE_CXX_STANDARD 14)
   set(CMAKE_CXX_EXTENSIONS OFF)
   set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
@@ -172,6 +172,28 @@ macro(arrayfire_set_cmake_default_variables)
   if(APPLE)
     set(CMAKE_INSTALL_RPATH "/opt/arrayfire/lib")
   endif()
+
+  include(WriteCompilerDetectionHeader)
+  write_compiler_detection_header(
+          FILE ${ArrayFire_BINARY_DIR}/include/af/compilers.h
+          PREFIX AF
+          COMPILERS AppleClang Clang GNU Intel MSVC
+          # NOTE: cxx_attribute_deprecated does not work well with C
+          FEATURES cxx_rvalue_references cxx_noexcept cxx_variadic_templates cxx_alignas cxx_static_assert
+          ALLOW_UNKNOWN_COMPILERS
+          #[VERSION <version>]
+          #[PROLOG <prolog>]
+          #[EPILOG <epilog>]
+          )
+endmacro()
+
+macro(set_policies)
+  cmake_parse_arguments(SP "" "TYPE" "POLICIES" ${ARGN})
+  foreach(_policy ${SP_POLICIES})
+    if(POLICY ${_policy})
+      cmake_policy(SET ${_policy} ${SP_TYPE})
+    endif()
+  endforeach()
 endmacro()
 
 mark_as_advanced(

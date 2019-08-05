@@ -20,6 +20,10 @@ include(platform)
 include(GetPrerequisites)
 include(CheckCXXCompilerFlag)
 
+set_policies(
+  TYPE NEW
+  POLICIES CMP0073
+           CMP0074)
 arrayfire_set_cmake_default_variables()
 
 #Set Intel OpenMP as default MKL thread layer
@@ -28,7 +32,6 @@ set(MKL_THREAD_LAYER "Intel OpenMP" CACHE STRING "The thread layer to choose for
 find_package(CUDA 7.0)
 find_package(OpenCL 1.2)
 find_package(OpenGL)
-find_package(OpenMP)
 find_package(FreeImage)
 find_package(Threads)
 find_package(FFTW)
@@ -206,6 +209,7 @@ install(DIRECTORY include/ DESTINATION ${AF_INSTALL_INC_DIR}
 ## The ArrayFire version file is generated and won't be included above, install
 ## it separately.
 install(FILES ${ArrayFire_BINARY_DIR}/include/af/version.h
+              ${ArrayFire_BINARY_DIR}/include/af/compilers.h
         DESTINATION "${AF_INSTALL_INC_DIR}/af/"
         COMPONENT headers)
 
@@ -316,11 +320,11 @@ configure_package_config_file(
 # CMake for examples and tests.
 unset(CMAKE_CXX_VISIBILITY_PRESET)
 
-include(CTest)
-
 configure_file(
   ${CMAKE_MODULE_PATH}/CTestCustom.cmake
-  ${PROJECT_BINARY_DIR}/CTestCustom.cmake)
+  ${ArrayFire_BINARY_DIR}/CTestCustom.cmake)
+
+include(CTest)
 
 # Handle depricated BUILD_TEST variable if found.
 if(BUILD_TEST)

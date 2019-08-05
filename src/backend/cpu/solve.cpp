@@ -75,15 +75,11 @@ template<typename T>
 Array<T> solveLU(const Array<T> &A, const Array<int> &pivot, const Array<T> &b,
                  const af_mat_prop options) {
     UNUSED(options);
-    A.eval();
-    pivot.eval();
-    b.eval();
-
     int N      = A.dims()[0];
     int NRHS   = b.dims()[1];
     Array<T> B = copyArray<T>(b);
 
-    auto func = [=](Param<T> A, Param<T> B, Param<int> pivot, int N, int NRHS) {
+    auto func = [=](CParam<T> A, Param<T> B, CParam<int> pivot, int N, int NRHS) {
         getrs_func<T>()(AF_LAPACK_COL_MAJOR, 'N', N, NRHS, A.get(),
                         A.strides(1), pivot.get(), B.get(), B.strides(1));
     };
@@ -95,14 +91,11 @@ Array<T> solveLU(const Array<T> &A, const Array<int> &pivot, const Array<T> &b,
 template<typename T>
 Array<T> triangleSolve(const Array<T> &A, const Array<T> &b,
                        const af_mat_prop options) {
-    A.eval();
-    b.eval();
-
     Array<T> B = copyArray<T>(b);
     int N      = B.dims()[0];
     int NRHS   = B.dims()[1];
 
-    auto func = [=](Param<T> A, Param<T> B, int N, int NRHS,
+    auto func = [=](const CParam<T> A, Param<T> B, int N, int NRHS,
                     const af_mat_prop options) {
         trtrs_func<T>()(AF_LAPACK_COL_MAJOR, options & AF_MAT_UPPER ? 'U' : 'L',
                         'N',  // transpose flag
@@ -117,9 +110,6 @@ Array<T> triangleSolve(const Array<T> &A, const Array<T> &b,
 template<typename T>
 Array<T> solve(const Array<T> &a, const Array<T> &b,
                const af_mat_prop options) {
-    a.eval();
-    b.eval();
-
     if (options & AF_MAT_UPPER || options & AF_MAT_LOWER) {
         return triangleSolve<T>(a, b, options);
     }

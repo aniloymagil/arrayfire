@@ -85,6 +85,7 @@ class SparseArrayBase {
     INSTANTIATE_INFO(bool, isReal)
     INSTANTIATE_INFO(bool, isDouble)
     INSTANTIATE_INFO(bool, isSingle)
+    INSTANTIATE_INFO(bool, isHalf)
     INSTANTIATE_INFO(bool, isRealFloating)
     INSTANTIATE_INFO(bool, isFloating)
     INSTANTIATE_INFO(bool, isInteger)
@@ -116,10 +117,8 @@ class SparseArrayBase {
     /// Returns the storage format of the SparseArray
     af::storage getStorage() const { return stype; }
 };
-#if __cplusplus > 199711L
 static_assert(std::is_standard_layout<SparseArrayBase>::value,
               "SparseArrayBase must be a standard layout type");
-#endif
 
 ////////////////////////////////////////////////////////////////////////////
 // Sparse Array Class
@@ -174,6 +173,7 @@ class SparseArray {
     INSTANTIATE_INFO(bool, isReal)
     INSTANTIATE_INFO(bool, isDouble)
     INSTANTIATE_INFO(bool, isSingle)
+    INSTANTIATE_INFO(bool, isHalf)
     INSTANTIATE_INFO(bool, isRealFloating)
     INSTANTIATE_INFO(bool, isFloating)
     INSTANTIATE_INFO(bool, isInteger)

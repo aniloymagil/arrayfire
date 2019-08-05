@@ -12,6 +12,7 @@
 #include <complex>
 
 #include <common/defines.hpp>
+#include <common/half.hpp>
 
 #include <clblast.h>
 #include <err_clblast.hpp>
@@ -49,6 +50,7 @@ clblast::Side           clblast_side_const ( magma_side_t  side  );
 template <typename T> struct CLBlastType { using Type = T; };
 template <> struct CLBlastType<cfloat> { using Type = std::complex<float>; };
 template <> struct CLBlastType<cdouble> { using Type = std::complex<double>; };
+template <> struct CLBlastType<common::half> { using Type = cl_half; };
 
 // Converts a constant from ArrayFire types (OpenCL) to CLBlast types (C++ std)
 template <typename T> typename CLBlastType<T>::Type inline toCLBlastConstant(const T val);
@@ -56,11 +58,17 @@ template <typename T> typename CLBlastType<T>::Type inline toCLBlastConstant(con
 // Specializations of the above function
 template <> float inline toCLBlastConstant(const float val) { return val; }
 template <> double inline toCLBlastConstant(const double val) { return val; }
+template <> cl_half inline toCLBlastConstant(const common::half val) {
+    cl_half out;
+    memcpy(&out, &val, sizeof(cl_half));
+    return out;
+}
 template <> std::complex<float> inline toCLBlastConstant(cfloat val) { return {val.s[0], val.s[1]}; }
 template <> std::complex<double> inline toCLBlastConstant(cdouble val) { return {val.s[0], val.s[1]}; }
 
 // Conversions to CLBlast basic types
 template <typename T> struct CLBlastBasicType { using Type = T; };
+template <> struct CLBlastBasicType<common::half> { using Type = cl_half; };
 template <> struct CLBlastBasicType<cfloat> { using Type = float; };
 template <> struct CLBlastBasicType<cdouble> { using Type = double; };
 

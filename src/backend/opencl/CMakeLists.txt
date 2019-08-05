@@ -96,6 +96,8 @@ target_sources(afopencl
     err_opencl.hpp
     errorcodes.cpp
     errorcodes.hpp
+    Event.hpp
+    Event.cpp
     exampleFunction.cpp
     exampleFunction.hpp
     fast.cpp
@@ -236,6 +238,7 @@ target_sources(afopencl
     triangle.cpp
     triangle.hpp
     types.hpp
+    types.cpp
     unary.hpp
     unwrap.cpp
     unwrap.hpp

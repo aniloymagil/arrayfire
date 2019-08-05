@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <common/defines.hpp>
 #include <common/host_memory.hpp>
 #include <device_manager.hpp>
 #include <platform.hpp>
@@ -80,6 +81,11 @@ string getDeviceInfo() {
 bool isDoubleSupported(int device) {
     UNUSED(device);
     return DeviceManager::IS_DOUBLE_SUPPORTED;
+}
+
+bool isHalfSupported(int device) {
+    UNUSED(device);
+    return DeviceManager::IS_HALF_SUPPORTED;
 }
 
 void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute) {

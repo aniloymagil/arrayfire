@@ -7,25 +7,27 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <Array.hpp>
-#include <handle.hpp>
 #include <index.hpp>
+
+#include <Array.hpp>
+#include <common/half.hpp>
+#include <handle.hpp>
 #include <kernel/index.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
 #include <af/dim4.hpp>
+
 #include <utility>
 #include <vector>
 
 using af::dim4;
+using common::half;
 using std::vector;
 
 namespace cpu {
 
 template<typename T>
 Array<T> index(const Array<T>& in, const af_index_t idxrs[]) {
-    in.eval();
-
     vector<bool> isSeq(4);
     vector<af_seq> seqs(4, af_span);
     // create seq vector to retrieve output
@@ -43,7 +45,6 @@ Array<T> index(const Array<T>& in, const af_index_t idxrs[]) {
     for (unsigned x = 0; x < isSeq.size(); ++x) {
         if (!isSeq[x]) {
             idxArrs[x] = castArray<uint>(idxrs[x].idx.arr);
-            idxArrs[x].eval();
             // set output array ith dimension value
             oDims[x] = idxArrs[x].elements();
         }
@@ -73,5 +74,6 @@ INSTANTIATE(uchar)
 INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
+INSTANTIATE(half)
 
 }  // namespace cpu

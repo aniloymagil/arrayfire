@@ -9,6 +9,7 @@
 
 #pragma once
 #include <common/defines.hpp>
+#include <common/half.hpp>
 #include <optypes.hpp>
 
 #include <array>
@@ -98,18 +99,19 @@ class Node {
 template<typename T>
 class TNode : public Node {
    public:
-    alignas(16) jit::array<T> m_val;
+    alignas(16) jit::array<compute_t<T>> m_val;
 
    public:
     TNode(T val, const int height,
           const std::array<Node_ptr, kMaxChildren> children)
         : Node(height, children) {
-        m_val.fill(val);
+        using namespace common;
+        m_val.fill(static_cast<compute_t<T>>(val));
     }
 };
 
 template<typename T>
 using TNode_ptr = std::shared_ptr<TNode<T>>;
-}  // namespace jit
 
+}  // namespace jit
 }  // namespace cpu

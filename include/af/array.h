@@ -8,13 +8,15 @@
  ********************************************************/
 
 #pragma once
+#include <af/compilers.h>
 #include <af/defines.h>
+#include <af/index.h>
 #include <af/seq.h>
 #include <af/util.h>
-#include <af/index.h>
 
 #ifdef __cplusplus
 #include <af/traits.hpp>
+
 namespace af
 {
 
@@ -49,7 +51,7 @@ namespace af
         public:
             array_proxy(array& par, af_index_t *ssss, bool linear = false);
             array_proxy(const array_proxy &other);
-#if __cplusplus > 199711L
+#if AF_COMPILER_CXX_RVALUE_REFERENCES
             array_proxy(array_proxy &&other);
             array_proxy & operator=(array_proxy &&other);
 #endif
@@ -118,6 +120,9 @@ namespace af
             inline bool isreal() const { return !iscomplex(); }
             bool isdouble() const;
             bool issingle() const;
+#if AF_API_VERSION >= 37
+            bool ishalf() const;
+#endif
             bool isrealfloating() const;
             bool isfloating() const;
             bool isinteger() const;
@@ -164,7 +169,7 @@ namespace af
             @{
         */
         /**
-            Create undimensioned array (no data, undefined size)
+            Create an uninitialized array (no data, undefined size)
 
             \code
             array A, B, C;   // creates three arrays called A, B and C
@@ -172,6 +177,31 @@ namespace af
         */
         array();
 
+#if AF_API_VERSION >= 37
+#if AF_COMPILER_CXX_RVALUE_REFERENCES
+        /**
+            Move constructor
+
+            Moves the \p other af::array into the current af::array. After this
+            operation, the \p other array will not be left uninitialized.
+
+            \param[in] other The array to be moved
+        */
+        array(array &&other) AF_NOEXCEPT;
+
+        /**
+            Move assignment operator
+
+            Moves the array into the current array. After this operation the
+            \p other array is left uninitialized. The previously referenced
+            af_array of the current object is released.
+
+            \param[in] other The array to be moved
+            \returns the reference to the current array
+        */
+        array &operator=(array &&other) AF_NOEXCEPT;
+#endif
+#endif
         /**
             Creates an array from an \ref af_array handle
             \param handle the af_array object.
@@ -638,17 +668,24 @@ namespace af
         bool isdouble() const;
 
         /**
-           \brief Returns true if the array type is neither \ref f64 nor \ref c64
+           \brief Returns true if the array type is either \ref f32 nor \ref c32
         */
         bool issingle() const;
 
+#if AF_API_VERSION >= 37
         /**
-           \brief Returns true if the array type is \ref f32 or \ref f64
+           \brief Returns true if the array type is \ref f16
+        */
+        bool ishalf() const;
+#endif
+
+        /**
+           \brief Returns true if the array type is \ref f16 \ref f32 or \ref f64
         */
         bool isrealfloating() const;
 
         /**
-           \brief Returns true if the array type is \ref f32, \ref f64, \ref c32 or \ref c64
+           \brief Returns true if the array type is \ref f16 \ref f32, \ref f64, \ref c32 or \ref c64
         */
         bool isfloating() const;
 
@@ -1403,7 +1440,7 @@ namespace af
     */
     inline const array &eval(const array &a) { a.eval(); return a; }
 
-#ifdef AF_HAS_VARIADIC_TEMPLATES
+#if AF_COMPILER_CXX_VARIADIC_TEMPLATES
     template <typename... ARRAYS>
     inline void eval(ARRAYS... in) {
         array *arrays[] = {const_cast<array *>(&in)...};
@@ -1444,7 +1481,7 @@ namespace af
         const array *arrays[] = {&a, &b, &c, &d, &e, &f};
         return eval(6, const_cast<array **>(arrays));
     }
-#endif  // __cplusplus > 199711L
+#endif // AF_COMPILER_CXX_VARIADIC_TEMPLATES
 #endif
 
 #if AF_API_VERSION >= 34
@@ -1528,6 +1565,8 @@ extern "C" {
 
     /**
        \brief Reduce the reference count of the \ref af_array
+
+       \note Zero initialized af_arrays can be accepted after version 3.7
     */
     AFAPI af_err af_release_array(af_array arr);
 
@@ -1702,7 +1741,7 @@ extern "C" {
 
         This is mutually exclusive to \ref af_is_complex
 
-        \param[out] result is true if arr is NOT of type \ref c32 or \ref c64, otherwise false
+        \param[out] result is true if arr is NOT \ref c32 or \ref c64, otherwise false
         \param[in] arr is the input array
 
         \returns error codes
@@ -1729,6 +1768,18 @@ extern "C" {
     */
     AFAPI af_err af_is_single       (bool *result, const af_array arr);
 
+#if AF_API_VERSION >= 37
+    /**
+        \brief Check if an array is 16 bit floating point type
+
+        \param[out] result is true if arr is of type \ref f16 otherwise false
+        \param[in] arr     is the input array
+
+        \returns error codes
+    */
+    AFAPI af_err af_is_half(bool *result, const af_array arr);
+#endif
+
     /**
         \brief Check if an array is real floating point type
 
@@ -1744,7 +1795,8 @@ extern "C" {
 
         This is a combination of \ref af_is_realfloating and \ref af_is_complex
 
-        \param[out] result is true if arr is of type \ref f32, \ref f64, \ref c32 or \ref c64, otherwise false
+        \param[out] result is true if arr is of type \ref f16 \ref f32, \ref
+                           f64, \ref c32 or \ref c64, otherwise false
         \param[in] arr is the input array
 
         \returns error codes

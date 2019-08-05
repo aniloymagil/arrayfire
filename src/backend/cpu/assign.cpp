@@ -12,6 +12,7 @@
 
 #include <Array.hpp>
 #include <Param.hpp>
+#include <common/half.hpp>
 #include <handle.hpp>
 #include <platform.hpp>
 #include <types.hpp>
@@ -25,14 +26,12 @@
 #include <vector>
 
 using af::dim4;
+using common::half;
 using std::vector;
 
 namespace cpu {
 template<typename T>
 void assign(Array<T>& out, const af_index_t idxrs[], const Array<T>& rhs) {
-    out.eval();
-    rhs.eval();
-
     vector<bool> isSeq(4);
     vector<af_seq> seqs(4, af_span);
     // create seq vector to retrieve output dimensions, offsets & offsets
@@ -71,5 +70,6 @@ INSTANTIATE(uchar)
 INSTANTIATE(char)
 INSTANTIATE(ushort)
 INSTANTIATE(short)
+INSTANTIATE(half)
 
 }  // namespace cpu

@@ -10,6 +10,7 @@
 #include <Array.hpp>
 #include <common/ArrayInfo.hpp>
 #include <common/complex.hpp>
+#include <common/half.hpp>
 #include <copy.hpp>
 #include <err_cpu.hpp>
 #include <kernel/copy.hpp>
@@ -22,6 +23,7 @@
 #include <cstdio>
 #include <cstring>
 
+using common::half;
 using common::is_complex;
 
 namespace cpu {
@@ -43,7 +45,6 @@ void copyData(T *to, const Array<T> &from) {
 
 template<typename T>
 Array<T> copyArray(const Array<T> &A) {
-    A.eval();
     Array<T> out = createEmptyArray<T>(A.dims());
     getQueue().enqueue(kernel::copy<T, T>, out, A);
     return out;
@@ -54,8 +55,6 @@ void copyArray(Array<outType> &out, Array<inType> const &in) {
     static_assert(
         !(is_complex<inType>::value && !is_complex<outType>::value),
         "Cannot copy from complex Array<T> to a non complex Array<T>");
-    out.eval();
-    in.eval();
     getQueue().enqueue(kernel::copy<outType, inType>, out, in);
 }
 
@@ -75,6 +74,7 @@ INSTANTIATE(intl)
 INSTANTIATE(uintl)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+INSTANTIATE(half)
 
 #define INSTANTIATE_COPY_ARRAY(SRC_T)                                 \
     template void copyArray<SRC_T, float>(Array<float> & dst,         \
@@ -100,6 +100,8 @@ INSTANTIATE(ushort)
     template void copyArray<SRC_T, uchar>(Array<uchar> & dst,         \
                                           Array<SRC_T> const &src);   \
     template void copyArray<SRC_T, char>(Array<char> & dst,           \
+                                         Array<SRC_T> const &src);    \
+    template void copyArray<SRC_T, half>(Array<half> & dst,           \
                                          Array<SRC_T> const &src);
 
 INSTANTIATE_COPY_ARRAY(float)
@@ -112,6 +114,7 @@ INSTANTIATE_COPY_ARRAY(uchar)
 INSTANTIATE_COPY_ARRAY(char)
 INSTANTIATE_COPY_ARRAY(ushort)
 INSTANTIATE_COPY_ARRAY(short)
+INSTANTIATE_COPY_ARRAY(half)
 
 #define INSTANTIATE_COPY_ARRAY_COMPLEX(SRC_T)                        \
     template void copyArray<SRC_T, cfloat>(Array<cfloat> & dst,      \
@@ -143,4 +146,5 @@ INSTANTIATE_GETSCALAR(intl)
 INSTANTIATE_GETSCALAR(uintl)
 INSTANTIATE_GETSCALAR(short)
 INSTANTIATE_GETSCALAR(ushort)
+INSTANTIATE_GETSCALAR(half)
 }  // namespace cpu

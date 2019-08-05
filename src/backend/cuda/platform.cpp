@@ -203,6 +203,12 @@ bool isDoubleSupported(int device) {
     return true;
 }
 
+bool isHalfSupported(int device) {
+    auto prop = getDeviceProp(device);
+    float compute = prop.major * 1000 + prop.minor * 10;
+    return compute >= 5030;
+}
+
 void devprop(char *d_name, char *d_platform, char *d_toolkit, char *d_compute) {
     if (getDeviceCount() <= 0) { return; }
 
@@ -425,6 +431,14 @@ af_err afcu_get_native_id(int *nativeid, int id) {
 af_err afcu_set_native_id(int nativeid) {
     try {
         cuda::setDevice(cuda::getDeviceIdFromNativeId(nativeid));
+    }
+    CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err afcu_cublasSetMathMode(cublasMath_t mode) {
+    try {
+        CUBLAS_CHECK(cublasSetMathMode(cuda::blasHandle(), mode));
     }
     CATCHALL;
     return AF_SUCCESS;

@@ -6,25 +6,26 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+#include <kernel/triangle.hpp>
+#include <triangle.hpp>
 
 #include <Array.hpp>
-#include <kernel/triangle.hpp>
+#include <common/half.hpp>
 #include <math.hpp>
 #include <platform.hpp>
-#include <triangle.hpp>
 #include <af/dim4.hpp>
+
+using common::half;
 
 namespace cpu {
 
 template<typename T, bool is_upper, bool is_unit_diag>
 void triangle(Array<T> &out, const Array<T> &in) {
-    in.eval();
     getQueue().enqueue(kernel::triangle<T, is_upper, is_unit_diag>, out, in);
 }
 
 template<typename T, bool is_upper, bool is_unit_diag>
 Array<T> triangle(const Array<T> &in) {
-    in.eval();
     Array<T> out = createEmptyArray<T>(in.dims());
     triangle<T, is_upper, is_unit_diag>(out, in);
     return out;
@@ -55,5 +56,6 @@ INSTANTIATE(char)
 INSTANTIATE(uchar)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+INSTANTIATE(half)
 
 }  // namespace cpu

@@ -10,8 +10,8 @@
 #pragma once
 
 #include <common/defines.hpp>
+#include <common/traits.hpp>
 #include <types.hpp>
-#include <af/traits.hpp>
 #include <sstream>
 #include <string>
 
@@ -46,7 +46,9 @@ STATIC_ bool iscplx<cl_double2>() {
 
 template<typename T>
 STATIC_ std::string scalar_to_option(const T &val) {
-    return std::to_string(+val);
+    using namespace common;
+    using namespace std;
+    return to_string(+val);
 }
 
 template<>

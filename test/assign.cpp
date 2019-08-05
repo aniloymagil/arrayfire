@@ -12,6 +12,9 @@
 #include <testHelpers.hpp>
 #include <af/dim4.hpp>
 #include <af/traits.hpp>
+
+#include <half.hpp>
+
 #include <string>
 #include <vector>
 
@@ -92,7 +95,7 @@ class ArrayAssign : public ::testing::Test {
 
 // create a list of types to be tested
 typedef ::testing::Types<float, cdouble, cfloat, double, int, uint, char, uchar,
-                         intl, uintl, short, ushort>
+                         intl, uintl, short, ushort, half_float::half>
     TestTypes;
 
 // register the type list
@@ -357,7 +360,7 @@ TYPED_TEST(ArrayAssign, AssignRowCPP) {
     SUPPORTED_TYPE_CHECK(TypeParam);
 
     const int dimsize = 10;
-    vector<TypeParam> input(100, 1);
+    vector<TypeParam> input(100, TypeParam(1.0));
     vector<TypeParam> sq(dimsize);
     vector<int> arIdx(2);
     for (int i = 0; i < (int)sq.size(); i++) sq[i] = i;
@@ -408,7 +411,7 @@ TYPED_TEST(ArrayAssign, AssignColumnCPP) {
     SUPPORTED_TYPE_CHECK(TypeParam);
 
     const int dimsize = 10;
-    vector<TypeParam> input(100, 1);
+    vector<TypeParam> input(100, TypeParam(1.0));
     vector<TypeParam> sq(dimsize);
     vector<int> arIdx(2);
     for (int i = 0; i < (int)sq.size(); i++) sq[i] = i;
@@ -458,7 +461,7 @@ TYPED_TEST(ArrayAssign, AssignColumnCPP) {
 TYPED_TEST(ArrayAssign, AssignSliceCPP) {
     SUPPORTED_TYPE_CHECK(TypeParam);
     const int dimsize = 10;
-    vector<TypeParam> input(1000, 1);
+    vector<TypeParam> input(1000, TypeParam(1.0));
     vector<TypeParam> sq(dimsize * dimsize);
     vector<int> arIdx(2);
     for (int i = 0; i < (int)sq.size(); i++) sq[i] = i;
@@ -553,8 +556,8 @@ TEST(ArrayAssign, CPP_ASSIGN_TO_INDEXED) {
 
     array input(10, 2, &in.front(), afHost);
 
-    input(span, 0) =
-        input(span, 1);  // <-- Tests array_proxy to array_proxy assignment
+    // Tests array_proxy to array_proxy assignment
+    input(span, 0) = input(span, 1);
 
     vector<int> out(20);
     input.host(&out.front());
@@ -1018,4 +1021,19 @@ TEST(Assign, ISSUE_1677) {
     } catch (exception &ex) {
         FAIL() << "ArrayFire exception: " << ex.what();
     } catch (...) { FAIL() << "Unknown exception thrown"; }
+}
+
+TEST(Index, ISSUE_2533) {
+    int elements = 5 * 10;
+    std::vector<float> gold(elements, 0);
+
+    int assigned_elements = 5 * 6;
+    for (int i = 0; i < assigned_elements; i++) { gold[i] = 1; }
+
+    af::array a = constant(0, 5, 10);
+    af::array b = constant(1, 5, 10);
+
+    a(af::span, af::seq(0, 5)) = b(af::span, af::seq(0, 5));
+
+    ASSERT_VEC_ARRAY_EQ(gold, dim4(5, 10), a);
 }

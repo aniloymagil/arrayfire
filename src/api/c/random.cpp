@@ -12,6 +12,7 @@
 #include <backend.hpp>
 #include <common/MersenneTwister.hpp>
 #include <common/err_common.hpp>
+#include <common/half.hpp>
 #include <handle.hpp>
 #include <random_engine.hpp>
 #include <types.hpp>
@@ -27,9 +28,7 @@ using namespace common;
 using af::dim4;
 
 Array<uint> emptyArray() {
-    static const Array<uint> EMPTY_ARRAY = createEmptyArray<uint>(af::dim4(0));
-
-    return EMPTY_ARRAY;
+    return createEmptyArray<uint>(af::dim4(0));
 }
 
 struct RandomEngine {
@@ -46,18 +45,15 @@ struct RandomEngine {
 
     RandomEngine(void)
         : type(AF_RANDOM_ENGINE_DEFAULT)
-        , seed(new uintl)
-        , counter(new uintl)
+        , seed(new uintl())
+        , counter(new uintl())
         , pos(emptyArray())
         , sh1(emptyArray())
         , sh2(emptyArray())
         , mask(0)
         , recursion_table(emptyArray())
         , temper_table(emptyArray())
-        , state(emptyArray()) {
-        *seed    = 0;
-        *counter = 0;
-    }
+        , state(emptyArray()) {}
 };
 
 af_random_engine getRandomEngineHandle(const RandomEngine engine) {
@@ -73,8 +69,9 @@ RandomEngine *getRandomEngine(const af_random_engine engineHandle) {
     return (RandomEngine *)engineHandle;
 }
 
+namespace {
 template<typename T>
-static inline af_array uniformDistribution_(const af::dim4 &dims,
+inline af_array uniformDistribution_(const af::dim4 &dims,
                                             RandomEngine *e) {
     if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
         return getHandle(uniformDistribution<T>(dims, e->pos, e->sh1, e->sh2,
@@ -87,7 +84,7 @@ static inline af_array uniformDistribution_(const af::dim4 &dims,
 }
 
 template<typename T>
-static inline af_array normalDistribution_(const af::dim4 &dims,
+inline af_array normalDistribution_(const af::dim4 &dims,
                                            RandomEngine *e) {
     if (e->type == AF_RANDOM_ENGINE_MERSENNE_GP11213) {
         return getHandle(normalDistribution<T>(dims, e->pos, e->sh1, e->sh2,
@@ -99,7 +96,7 @@ static inline af_array normalDistribution_(const af::dim4 &dims,
     }
 }
 
-static void validateRandomType(const af_random_engine_type type) {
+void validateRandomType(const af_random_engine_type type) {
     if ((type != AF_RANDOM_ENGINE_PHILOX_4X32_10) &&
         (type != AF_RANDOM_ENGINE_THREEFRY_2X32_16) &&
         (type != AF_RANDOM_ENGINE_MERSENNE_GP11213) &&
@@ -110,13 +107,14 @@ static void validateRandomType(const af_random_engine_type type) {
         AF_ERROR("Invalid random type", AF_ERR_ARG);
     }
 }
+}
 
 af_err af_get_default_random_engine(af_random_engine *r) {
     try {
         AF_CHECK(af_init());
 
-        thread_local RandomEngine re;
-        *r = static_cast<af_random_engine>(&re);
+        thread_local RandomEngine *re = new RandomEngine;
+        *r = static_cast<af_random_engine>(re);
         return AF_SUCCESS;
     }
     CATCHALL;
@@ -271,6 +269,7 @@ af_err af_random_uniform(af_array *out, const unsigned ndims,
             case u16: result = uniformDistribution_<ushort>(d, e); break;
             case u8: result = uniformDistribution_<uchar>(d, e); break;
             case b8: result = uniformDistribution_<char>(d, e); break;
+            case f16: result = uniformDistribution_<half>(d, e); break;
             default: TYPE_ERROR(4, type);
         }
         std::swap(*out, result);
@@ -294,6 +293,7 @@ af_err af_random_normal(af_array *out, const unsigned ndims,
             case c32: result = normalDistribution_<cfloat>(d, e); break;
             case f64: result = normalDistribution_<double>(d, e); break;
             case c64: result = normalDistribution_<cdouble>(d, e); break;
+            case f16: result = normalDistribution_<half>(d, e); break;
             default: TYPE_ERROR(4, type);
         }
         std::swap(*out, result);
@@ -335,6 +335,7 @@ af_err af_randu(af_array *out, const unsigned ndims, const dim_t *const dims,
             case u16: result = uniformDistribution_<ushort>(d, e); break;
             case u8: result = uniformDistribution_<uchar>(d, e); break;
             case b8: result = uniformDistribution_<char>(d, e); break;
+            case f16: result = uniformDistribution_<half>(d, e); break;
             default: TYPE_ERROR(3, type);
         }
         std::swap(*out, result);
@@ -359,6 +360,7 @@ af_err af_randn(af_array *out, const unsigned ndims, const dim_t *const dims,
             case c32: result = normalDistribution_<cfloat>(d, e); break;
             case f64: result = normalDistribution_<double>(d, e); break;
             case c64: result = normalDistribution_<cdouble>(d, e); break;
+            case f16: result = normalDistribution_<half>(d, e); break;
             default: TYPE_ERROR(3, type);
         }
         std::swap(*out, result);

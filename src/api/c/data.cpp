@@ -9,6 +9,7 @@
 
 #include <backend.hpp>
 #include <common/err_common.hpp>
+#include <common/half.hpp>
 #include <copy.hpp>
 #include <diagonal.hpp>
 #include <handle.hpp>
@@ -23,9 +24,9 @@
 #include <af/device.h>
 #include <af/dim4.hpp>
 #include <af/util.h>
-#include <complex>
 
 using af::dim4;
+using common::half;
 using namespace detail;
 
 dim4 verifyDims(const unsigned ndims, const dim_t *const dims) {
@@ -68,6 +69,7 @@ af_err af_constant(af_array *result, const double value, const unsigned ndims,
             case u64: out = createHandleFromValue<uintl>(d, value); break;
             case s16: out = createHandleFromValue<short>(d, value); break;
             case u16: out = createHandleFromValue<ushort>(d, value); break;
+            case f16: out = createHandleFromValue<half>(d, value); break;
             default: TYPE_ERROR(4, type);
         }
         std::swap(*result, out);
@@ -184,6 +186,7 @@ af_err af_identity(af_array *out, const unsigned ndims, const dim_t *const dims,
                 // Removed because of bool type. Functions implementations
                 // exist.
             case b8: result = identity_<char>(d); break;
+            case f16: result = identity_<half>(d); break;
             default: TYPE_ERROR(3, type);
         }
         std::swap(*out, result);
@@ -221,6 +224,7 @@ af_err af_range(af_array *result, const unsigned ndims, const dim_t *const dims,
             case s16: out = range_<short>(d, seq_dim); break;
             case u16: out = range_<ushort>(d, seq_dim); break;
             case u8: out = range_<uchar>(d, seq_dim); break;
+            case f16: out = range_<half>(d, seq_dim); break;
             default: TYPE_ERROR(4, type);
         }
         std::swap(*result, out);
@@ -260,6 +264,7 @@ af_err af_iota(af_array *result, const unsigned ndims, const dim_t *const dims,
             case s16: out = iota_<short>(d, t); break;
             case u16: out = iota_<ushort>(d, t); break;
             case u8: out = iota_<uchar>(d, t); break;
+            case f16: out = iota_<half>(d, t); break;
             default: TYPE_ERROR(4, type);
         }
         std::swap(*result, out);
@@ -307,6 +312,7 @@ af_err af_diag_create(af_array *out, const af_array in, const int num) {
                 // Removed because of bool type. Functions implementations
                 // exist.
             case b8: result = diagCreate<char>(in, num); break;
+            case f16: result = diagCreate<half>(in, num); break;
             default: TYPE_ERROR(1, type);
         }
 
@@ -345,6 +351,7 @@ af_err af_diag_extract(af_array *out, const af_array in, const int num) {
                 // Removed because of bool type. Functions implementations
                 // exist.
             case b8: result = diagExtract<char>(in, num); break;
+            case f16: result = diagExtract<half>(in, num); break;
             default: TYPE_ERROR(1, type);
         }
 
@@ -384,6 +391,7 @@ af_err af_lower(af_array *out, const af_array in, bool is_unit_diag) {
             case u16: res = triangle<ushort, false>(in, is_unit_diag); break;
             case u8: res = triangle<uchar, false>(in, is_unit_diag); break;
             case b8: res = triangle<char, false>(in, is_unit_diag); break;
+            case f16: res = triangle<half, false>(in, is_unit_diag); break;
         }
         std::swap(*out, res);
     }
@@ -412,6 +420,7 @@ af_err af_upper(af_array *out, const af_array in, bool is_unit_diag) {
             case u16: res = triangle<ushort, true>(in, is_unit_diag); break;
             case u8: res = triangle<uchar, true>(in, is_unit_diag); break;
             case b8: res = triangle<char, true>(in, is_unit_diag); break;
+            case f16: res = triangle<half, true>(in, is_unit_diag); break;
         }
         std::swap(*out, res);
     }

@@ -6,33 +6,28 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-
-#include <Array.hpp>
 #include <kernel/select.hpp>
-#include <platform.hpp>
-#include <queue.hpp>
 #include <select.hpp>
 
+#include <Array.hpp>
+#include <common/half.hpp>
+#include <platform.hpp>
+#include <queue.hpp>
+
 using af::dim4;
+using common::half;
 
 namespace cpu {
 
 template<typename T>
 void select(Array<T> &out, const Array<char> &cond, const Array<T> &a,
             const Array<T> &b) {
-    out.eval();
-    cond.eval();
-    a.eval();
-    b.eval();
     getQueue().enqueue(kernel::select<T>, out, cond, a, b);
 }
 
 template<typename T, bool flip>
 void select_scalar(Array<T> &out, const Array<char> &cond, const Array<T> &a,
                    const double &b) {
-    out.eval();
-    cond.eval();
-    a.eval();
     getQueue().enqueue(kernel::select_scalar<T, flip>, out, cond, a, b);
 }
 
@@ -58,5 +53,6 @@ INSTANTIATE(char)
 INSTANTIATE(uchar)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+INSTANTIATE(half)
 
 }  // namespace cpu

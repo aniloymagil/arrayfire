@@ -44,6 +44,8 @@ target_sources(afcpu
     diff.cpp
     diff.hpp
     err_cpu.hpp
+    Event.cpp
+    Event.hpp
     exampleFunction.cpp
     exampleFunction.hpp
     fast.cpp
@@ -204,7 +206,6 @@ target_sources(afcpu
     kernel/dot.hpp
     kernel/exampleFunction.hpp
     kernel/fast.hpp
-    kernel/fft.hpp
     kernel/fftconvolve.hpp
     kernel/gradient.hpp
     kernel/harris.hpp
@@ -263,6 +264,7 @@ endif(AF_WITH_CPUID)
 target_sources(afcpu
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/threads/async_queue.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/threads/event.hpp
   )
 
 arrayfire_set_default_cxx_flags(afcpu)

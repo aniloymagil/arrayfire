@@ -11,18 +11,14 @@
 
 #ifdef __CUDACC_RTC__
 
-#define CUDART_INF_F __int_as_float(0x7f800000)
-#define CUDART_INF __longlong_as_double(0x7ff0000000000000ULL)
 #define STATIC_ inline
 
 #else  //__CUDACC_RTC__
 
 #include <common/defines.hpp>
-#include <af/defines.h>
 
 #ifdef __CUDACC__
 #include <cuda_runtime_api.h>
-#include <math_constants.h>
 #endif  //__CUDACC__
 
 #include <algorithm>
@@ -30,8 +26,13 @@
 
 #endif  //__CUDACC_RTC__
 
-#include "backend.hpp"
-#include "types.hpp"
+#include <backend.hpp>
+#include <types.hpp>
+#include <af/defines.h>
+#include <common/half.hpp>
+
+#include <cuda_fp16.h>
+#include <math_constants.h>
 
 namespace cuda {
 
@@ -53,7 +54,40 @@ static inline __DH__ size_t max(size_t lhs, size_t rhs) {
     return lhs > rhs ? lhs : rhs;
 }
 
-#ifndef __CUDA_ARCH__
+#ifdef __CUDA_ARCH__
+static inline __device__ __half abs(__half val) {
+    return __short_as_half(__half_as_short(val) & 0x7FFF);
+}
+
+template<typename T>
+inline __DH__ T min(T lhs, T rhs) {
+    return ::min(lhs, rhs);
+}
+
+template<typename T>
+inline __DH__ T max(T lhs, T rhs) {
+    return ::max(lhs, rhs);
+}
+
+template<>
+inline __DH__ __half min<__half>(__half lhs, __half rhs) {
+#if __CUDA_ARCH__ >= 530
+    return __hlt(lhs, rhs) ? lhs : rhs;
+#else
+    return (float)lhs < (float)rhs ? lhs : rhs;
+#endif
+}
+
+template<>
+inline __DH__ __half max<__half>(__half lhs, __half rhs) {
+#if __CUDA_ARCH__ >= 530
+    return __hgt(lhs, rhs) ? lhs : rhs;
+#else
+    return (float)lhs > (float)rhs ? lhs : rhs;
+#endif
+}
+
+#else
 template<typename T>
 static inline __DH__ T min(T lhs, T rhs) {
     return std::min(lhs, rhs);
@@ -61,15 +95,6 @@ static inline __DH__ T min(T lhs, T rhs) {
 template<typename T>
 static inline __DH__ T max(T lhs, T rhs) {
     return std::max(lhs, rhs);
-}
-#else
-template<typename T>
-static inline __DH__ T min(T lhs, T rhs) {
-    return ::min(lhs, rhs);
-}
-template<typename T>
-static inline __DH__ T max(T lhs, T rhs) {
-    return ::max(lhs, rhs);
 }
 #endif
 
@@ -206,6 +231,22 @@ __device__ short minval<short>() {
 template<>
 __device__ ushort maxval<ushort>() {
     return ((ushort)1) << (8 * sizeof(ushort) - 1);
+}
+template<>
+__device__ common::half maxval<common::half>() {
+    return common::half(65537.f);
+}
+template<>
+__device__ common::half minval<common::half>() {
+    return common::half(-65537.f);
+}
+template<>
+__device__ __half maxval<__half>() {
+    return __float2half(65537.f);
+}
+template<>
+__device__ __half minval<__half>() {
+    return __float2half(-65537.f);
 }
 #endif
 

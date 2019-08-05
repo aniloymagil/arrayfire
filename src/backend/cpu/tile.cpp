@@ -7,17 +7,19 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <Array.hpp>
 #include <kernel/tile.hpp>
-#include <platform.hpp>
 #include <tile.hpp>
+
+#include <Array.hpp>
+#include <common/half.hpp>
+#include <platform.hpp>
+
+using common::half;
 
 namespace cpu {
 
 template<typename T>
 Array<T> tile(const Array<T> &in, const af::dim4 &tileDims) {
-    in.eval();
-
     const af::dim4 iDims = in.dims();
     af::dim4 oDims       = iDims;
     oDims *= tileDims;
@@ -48,5 +50,6 @@ INSTANTIATE(uchar)
 INSTANTIATE(char)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+INSTANTIATE(half)
 
 }  // namespace cpu

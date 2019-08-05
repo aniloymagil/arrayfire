@@ -9,6 +9,7 @@
 
 #pragma once
 #include <backend.hpp>
+#include <common/half.hpp>
 #include <math.hpp>
 
 #ifndef __DH__
@@ -24,9 +25,9 @@ using namespace detail;
 
 template<typename T, af_op_t op>
 struct Binary {
-    static __DH__ T init() { return detail::scalar<T>(0); }
+    static __DH__ T init();
 
-    __DH__ T operator()(T lhs, T rhs) { return lhs + rhs; }
+    __DH__ T operator()(T lhs, T rhs);
 };
 
 template<typename T>
@@ -128,34 +129,34 @@ SPECIALIZE_COMPLEX_MAX(cdouble, double)
 
 template<typename Ti, typename To, af_op_t op>
 struct Transform {
-    __DH__ To operator()(Ti in) { return (To)(in); }
+    __DH__ To operator()(Ti in) { return static_cast<To>(in); }
 };
 
 template<typename Ti, typename To>
 struct Transform<Ti, To, af_min_t> {
     __DH__ To operator()(Ti in) {
-        return (To)(IS_NAN(in) ? Binary<To, af_min_t>::init() : in);
+        return IS_NAN(in) ? Binary<To, af_min_t>::init() : To(in);
     }
 };
 
 template<typename Ti, typename To>
 struct Transform<Ti, To, af_max_t> {
     __DH__ To operator()(Ti in) {
-        return (To)(IS_NAN(in) ? Binary<To, af_max_t>::init() : in);
+        return IS_NAN(in) ? Binary<To, af_max_t>::init() : To(in);
     }
 };
 
 template<typename Ti, typename To>
 struct Transform<Ti, To, af_or_t> {
-    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0)); }
+    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0.)); }
 };
 
 template<typename Ti, typename To>
 struct Transform<Ti, To, af_and_t> {
-    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0)); }
+    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0.)); }
 };
 
 template<typename Ti, typename To>
 struct Transform<Ti, To, af_notzero_t> {
-    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0)); }
+    __DH__ To operator()(Ti in) { return (in != detail::scalar<Ti>(0.)); }
 };
