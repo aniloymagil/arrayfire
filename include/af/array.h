@@ -203,7 +203,10 @@ namespace af
 #endif
 #endif
         /**
-            Creates an array from an \ref af_array handle
+            Creates an array from an \ref af_array handle. Does not increment 
+            a reference counter: the array assumes ownership of the handle. To 
+            share the array between multiple objects, use this in conjunction 
+            with \ref af_retain_array.
             \param handle the af_array object.
          */
         explicit
@@ -572,7 +575,7 @@ namespace af
         af_array get() const;
 
         /**
-           get the number of elements in array
+           Get the total number of elements across all dimensions of the array
         */
         dim_t elements() const;
 
@@ -1571,7 +1574,7 @@ extern "C" {
     AFAPI af_err af_release_array(af_array arr);
 
     /**
-       Increments an \ref af_array reference count
+       Increments an \ref af_array reference count.
     */
     AFAPI af_err af_retain_array(af_array *out, const af_array in);
 
@@ -1580,7 +1583,7 @@ extern "C" {
        \ingroup method_mat
        @{
 
-       Get the use count of `af_array`
+       Get the reference count of \ref af_array
     */
     AFAPI af_err af_get_data_ref_count(int *use_count, const af_array in);
 #endif
@@ -1631,7 +1634,7 @@ extern "C" {
         @{
     */
     /**
-        \brief Gets the number of elements in an array.
+        \brief Get the total number of elements across all dimensions of the array
 
         \param[out] elems is the output that contains number of elements of \p arr
         \param[in] arr is the input array

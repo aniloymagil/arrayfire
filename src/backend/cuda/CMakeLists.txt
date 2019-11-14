@@ -12,6 +12,7 @@ dependency_check(CUDA_FOUND "CUDA not found.")
 
 find_cuda_helper_libs(nvrtc)
 find_cuda_helper_libs(nvrtc-builtins)
+find_cuda_helper_libs(cudnn)
 
 get_filename_component(CUDA_LIBRARIES_PATH ${CUDA_cudart_static_LIBRARY} DIRECTORY CACHE)
 
@@ -172,13 +173,19 @@ endfunction()
 arrayfire_get_cuda_cxx_flags(cuda_cxx_flags)
 arrayfire_get_platform_definitions(platform_flags)
 
-if(AF_WITH_NONFREE AND CMAKE_VERSION VERSION_LESS "3.7")
-  # This definition is required in addition to the definition below because in
-  # an older verion of cmake definitions added using target_compile_definitions
-  # were not added to the nvcc flags. This manually adds these definitions and
-  # pass them to the options parameter in cuda_add_library
-  string(APPEND cuda_cxx_flags " -DAF_WITH_NONFREE_SIFT")
+# This definition is required in addition to the definition below because in
+# an older verion of cmake definitions added using target_compile_definitions
+# were not added to the nvcc flags. This manually adds these definitions and
+# pass them to the options parameter in cuda_add_library
+if(AF_WITH_NONFREE)
+  set(cxx_definitions -DAF_WITH_NONFREE_SIFT)
 endif()
+
+# CUDA_NO_HALF prevents the inclusion of the half class in the global namespace
+# which conflicts with the half class in ArrayFire's common namespace. prefer
+# using __half class instead for CUDA
+list(APPEND cxx_definitions -DAF_CUDA;-DCUDA_NO_HALF)
+list(APPEND cuda_cxx_flags ${cxx_definitions})
 
 include(kernel/scan_by_key/CMakeLists.txt)
 include(kernel/thrust_sort_by_key/CMakeLists.txt)
@@ -361,6 +368,8 @@ cuda_add_library(afcuda
     copy.hpp
     cublas.cpp
     cublas.hpp
+    cudnn.cpp
+    cudnn.hpp
     cufft.cpp
     cufft.hpp
     cusolverDn.cpp
@@ -475,21 +484,18 @@ cuda_add_library(afcuda
 
     nvrtc/cache.cpp
 
-    OPTIONS "${platform_flags} ${cuda_cxx_flags} -Xcudafe \"--diag_suppress=1427\""
+    OPTIONS ${platform_flags} ${cuda_cxx_flags} -Xcudafe \"--diag_suppress=1427\"
   )
 
 arrayfire_set_default_cxx_flags(afcuda)
 
-# CUDA_NO_HALF prevents the inclusion of the half class in the global namespace
-# which conflicts with the half class in ArrayFire's common namespace. prefer
-# using __half class instead for CUDA
-target_compile_definitions(afcuda PRIVATE AF_CUDA CUDA_NO_HALF)
+# NOTE: Do not add additional CUDA specific definitions here. Add it to the
+# cxx_definitions variable above. cxx_definitions is used to propigate
+# definitions to the scan_by_key and thrust_sort_by_key targets as well as the
+# cuda library above.
+target_compile_options(afcuda PRIVATE ${cxx_definitions})
 
 add_library(ArrayFire::afcuda ALIAS afcuda)
-
-if(AF_WITH_NONFREE)
-  target_compile_definitions(afcuda PRIVATE AF_WITH_NONFREE_SIFT)
-endif()
 
 add_dependencies(afcuda ${jit_kernel_targets} ${nvrtc_kernel_targets})
 add_dependencies(cuda_scan_by_key ${nvrtc_kernel_targets})
@@ -510,6 +516,12 @@ target_include_directories (afcuda
 
 set_target_properties(afcuda PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# Remove cublas_device library which is no longer included with the cuda
+# toolkit. Fixes issues with older CMake versions
+if(DEFINED CUDA_cublas_device_LIBRARY AND NOT CUDA_cublas_device_LIBRARY)
+  list(REMOVE_ITEM CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_device_LIBRARY})
+endif()
+
 target_link_libraries(afcuda
   PRIVATE
     c_api_interface
@@ -523,6 +535,7 @@ target_link_libraries(afcuda
     ${CUDA_CUFFT_LIBRARIES}
     ${CUDA_cusolver_LIBRARY}
     ${CUDA_cusparse_LIBRARY}
+    ${CUDA_cudnn_LIBRARY}
     ${CMAKE_DL_LIBS}
   )
 

@@ -8,6 +8,7 @@
  ********************************************************/
 
 #include <af/array.h>
+#include <af/dim4.hpp>
 #include <af/signal.h>
 #include "symbol_manager.hpp"
 
@@ -26,6 +27,13 @@ af_err af_approx1_v2(af_array *yo, const af_array yi, const af_array xo,
 af_err af_approx2(af_array *zo, const af_array zi, const af_array xo,
                   const af_array yo, const af_interp_type method,
                   const float offGrid) {
+    CHECK_ARRAYS(zo, zi, xo, yo);
+    return CALL(zo, zi, xo, yo, method, offGrid);
+}
+
+af_err af_approx2_v2(af_array *zo, const af_array zi, const af_array xo,
+                     const af_array yo, const af_interp_type method,
+                     const float offGrid) {
     CHECK_ARRAYS(zo, zi, xo, yo);
     return CALL(zo, zi, xo, yo, method, offGrid);
 }
@@ -52,7 +60,18 @@ af_err af_approx2_uniform(af_array *zo, const af_array zi, const af_array xo,
                           const int ydim, const double yi_beg,
                           const double yi_step, const af_interp_type method,
                           const float offGrid) {
-    CHECK_ARRAYS(zi, xo, yo);
+    CHECK_ARRAYS(zo, zi, xo, yo);
+    return CALL(zo, zi, xo, xdim, xi_beg, xi_step, yo, ydim, yi_beg, yi_step,
+                method, offGrid);
+}
+
+af_err af_approx2_uniform_v2(af_array *zo, const af_array zi, const af_array xo,
+                             const int xdim, const double xi_beg,
+                             const double xi_step, const af_array yo,
+                             const int ydim, const double yi_beg,
+                             const double yi_step, const af_interp_type method,
+                             const float offGrid) {
+    CHECK_ARRAYS(zo, zi, xo, yo);
     return CALL(zo, zi, xo, xdim, xi_beg, xi_step, yo, ydim, yi_beg, yi_step,
                 method, offGrid);
 }
@@ -150,6 +169,30 @@ FFTC2R_HAPI_DEF(af_fft3_c2r)
 CONV_HAPI_DEF(af_convolve1)
 CONV_HAPI_DEF(af_convolve2)
 CONV_HAPI_DEF(af_convolve3)
+
+af_err af_convolve2_nn(af_array *out, const af_array signal,
+                       const af_array filter, const unsigned stride_dims,
+                       const dim_t *strides, const unsigned padding_dims,
+                       const dim_t *paddings, const unsigned dilation_dims,
+                       const dim_t *dilations) {
+    CHECK_ARRAYS(signal, filter);
+    return CALL(out, signal, filter, stride_dims, strides, padding_dims,
+                paddings, dilation_dims, dilations);
+}
+
+af_err af_convolve2_gradient_nn(
+    af_array *out, const af_array incoming_gradient,
+    const af_array original_signal, const af_array original_filter,
+    const af_array convolved_output, const unsigned stride_dims,
+    const dim_t *strides, const unsigned padding_dims, const dim_t *paddings,
+    const unsigned dilation_dims, const dim_t *dilations,
+    af_conv_gradient_type grad_type) {
+
+    CHECK_ARRAYS(incoming_gradient, original_signal, original_filter, convolved_output);
+    return CALL(out, incoming_gradient, original_signal, original_filter, convolved_output,
+                stride_dims, strides, padding_dims, paddings, dilation_dims, dilations, grad_type);
+
+}
 
 #define FFT_CONV_HAPI_DEF(af_func)                                   \
     af_err af_func(af_array *out, const af_array signal,             \

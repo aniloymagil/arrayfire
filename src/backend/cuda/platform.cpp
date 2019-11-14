@@ -18,16 +18,18 @@
 #include <common/unique_handle.hpp>
 #include <common/util.hpp>
 #include <cublas.hpp>
+#include <cudnn.hpp>
 #include <cufft.hpp>
 #include <cusolverDn.hpp>
 #include <cusparse.hpp>
-#include <driver.h>
 #include <device_manager.hpp>
+#include <driver.h>
 #include <err_cuda.hpp>
 #include <memory.hpp>
 #include <spdlog/spdlog.h>
 #include <version.hpp>
 #include <af/cuda.h>
+#include <af/device.h>
 #include <af/version.h>
 // cuda_gl_interop.h does not include OpenGL headers for ARM
 #include <common/graphics_common.hpp>
@@ -81,8 +83,9 @@ static inline int getMinSupportedCompute(int cudaMajorVer) {
                                   : minSV[cudaMajorVer - 1]);
 }
 
-unique_handle<cublasHandle_t>* cublasManager(const int deviceId) {
-    thread_local unique_handle<cublasHandle_t> handles[DeviceManager::MAX_DEVICES];
+unique_handle<cublasHandle_t> *cublasManager(const int deviceId) {
+    thread_local unique_handle<cublasHandle_t>
+        handles[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
 
     call_once(initFlags[deviceId], [&] {
@@ -90,14 +93,28 @@ unique_handle<cublasHandle_t>* cublasManager(const int deviceId) {
         // TODO(pradeep) When multiple streams per device
         // is added to CUDA backend, move the cublasSetStream
         // call outside of call_once scope.
-        CUBLAS_CHECK(cublasSetStream(handles[deviceId],
-                                     cuda::getStream(deviceId)));
+        CUBLAS_CHECK(
+            cublasSetStream(handles[deviceId], cuda::getStream(deviceId)));
     });
 
     return &handles[deviceId];
 }
 
-unique_ptr<PlanCache>& cufftManager(const int deviceId) {
+unique_handle<cudnnHandle_t> *nnManager(const int deviceId) {
+    thread_local unique_handle<cudnnHandle_t>
+        cudnnHandles[DeviceManager::MAX_DEVICES];
+    thread_local std::once_flag initFlags[DeviceManager::MAX_DEVICES];
+
+    std::call_once(initFlags[deviceId],
+                   [&] { cudnnHandles[deviceId].create(); });
+
+    CUDNN_CHECK(
+        cudnnSetStream(cudnnHandles[deviceId], cuda::getStream(deviceId)));
+
+    return &cudnnHandles[deviceId];
+}
+
+unique_ptr<PlanCache> &cufftManager(const int deviceId) {
     thread_local unique_ptr<PlanCache> caches[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
     call_once(initFlags[deviceId],
@@ -105,7 +122,7 @@ unique_ptr<PlanCache>& cufftManager(const int deviceId) {
     return caches[deviceId];
 }
 
-unique_handle<cusolverDnHandle_t>* cusolverManager(const int deviceId) {
+unique_handle<cusolverDnHandle_t> *cusolverManager(const int deviceId) {
     thread_local unique_handle<cusolverDnHandle_t>
         handles[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
@@ -114,8 +131,8 @@ unique_handle<cusolverDnHandle_t>* cusolverManager(const int deviceId) {
         // TODO(pradeep) When multiple streams per device
         // is added to CUDA backend, move the cublasSetStream
         // call outside of call_once scope.
-        CUSOLVER_CHECK(cusolverDnSetStream(handles[deviceId],
-                                           cuda::getStream(deviceId)));
+        CUSOLVER_CHECK(
+            cusolverDnSetStream(handles[deviceId], cuda::getStream(deviceId)));
     });
     // TODO(pradeep) prior to this change, stream was being synced in get solver
     // handle because of some cusolver bug. Re-enable that if this change
@@ -127,16 +144,17 @@ unique_handle<cusolverDnHandle_t>* cusolverManager(const int deviceId) {
     return &handles[deviceId];
 }
 
-unique_handle<cusparseHandle_t>* cusparseManager(const int deviceId) {
-    thread_local unique_handle<cusparseHandle_t> handles[DeviceManager::MAX_DEVICES];
+unique_handle<cusparseHandle_t> *cusparseManager(const int deviceId) {
+    thread_local unique_handle<cusparseHandle_t>
+        handles[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
     call_once(initFlags[deviceId], [&] {
         handles[deviceId].create();
         // TODO(pradeep) When multiple streams per device
         // is added to CUDA backend, move the cublasSetStream
         // call outside of call_once scope.
-        CUSPARSE_CHECK(cusparseSetStream(handles[deviceId],
-                                         cuda::getStream(deviceId)));
+        CUSPARSE_CHECK(
+            cusparseSetStream(handles[deviceId], cuda::getStream(deviceId)));
     });
     return &handles[deviceId];
 }
@@ -150,6 +168,7 @@ DeviceManager::~DeviceManager() {
         delete cusparseManager(i);
         cufftManager(i).reset();
         delete cublasManager(i);
+        delete nnManager(i);
     }
 }
 
@@ -204,7 +223,7 @@ bool isDoubleSupported(int device) {
 }
 
 bool isHalfSupported(int device) {
-    auto prop = getDeviceProp(device);
+    auto prop     = getDeviceProp(device);
     float compute = prop.major * 1000 + prop.minor * 10;
     return compute >= 5030;
 }
@@ -282,7 +301,7 @@ unsigned getMaxJitSize() {
     return length;
 }
 
-int& tlocalActiveDeviceId() {
+int &tlocalActiveDeviceId() {
     thread_local int activeDeviceId = 0;
 
     return activeDeviceId;
@@ -381,9 +400,9 @@ PlanCache &fftManager() {
     return *(cufftManager(cuda::getActiveDeviceId()).get());
 }
 
-BlasHandle blasHandle() {
-    return *cublasManager(cuda::getActiveDeviceId());
-}
+BlasHandle blasHandle() { return *cublasManager(cuda::getActiveDeviceId()); }
+
+cudnnHandle_t nnHandle() { return *nnManager(cuda::getActiveDeviceId()); }
 
 SolveHandle solverDnHandle() {
     return *cusolverManager(cuda::getActiveDeviceId());
@@ -443,3 +462,12 @@ af_err afcu_cublasSetMathMode(cublasMath_t mode) {
     CATCHALL;
     return AF_SUCCESS;
 }
+
+namespace af {
+template<>
+__half *array::device<__half>() const {
+    void *ptr = NULL;
+    af_get_device_ptr(&ptr, get());
+    return (__half *)ptr;
+}
+}  // namespace af

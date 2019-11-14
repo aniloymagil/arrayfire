@@ -227,9 +227,9 @@ Node_ptr Array<T>::getNode() const {
 /// 2. The number of parameters we are passing into the kernel exceeds the
 ///    limitation on the platform. For NVIDIA this is 4096 bytes. The
 template<typename T>
-bool passesJitHeuristics(Node *root_node) {
-    if (!evalFlag()) return true;
-    if (root_node->getHeight() >= (int)getMaxJitSize()) { return false; }
+kJITHeuristics passesJitHeuristics(Node *root_node) {
+    if (!evalFlag()) { return kJITHeuristics::Pass; }
+    if (root_node->getHeight() >= (int)getMaxJitSize()) { return kJITHeuristics::TreeHeight; }
 
     size_t alloc_bytes, alloc_buffers;
     size_t lock_bytes, lock_buffers;
@@ -247,9 +247,11 @@ bool passesJitHeuristics(Node *root_node) {
         constexpr size_t base_param_size =
             sizeof(Param<T>) + (4 * sizeof(uint));
 
+        // extra padding for safety to avoid failure during compilation
+        constexpr size_t jit_padding_size = 256; //@umar dontfix!
         // This is the maximum size of the params that can be allowed by the
         // CUDA platform.
-        constexpr size_t max_param_size = 4096 - base_param_size;
+        constexpr size_t max_param_size = 4096 - base_param_size - jit_padding_size;
 
         struct tree_info {
             size_t total_buffer_size;
@@ -280,12 +282,14 @@ bool passesJitHeuristics(Node *root_node) {
         // will trigger an evaluation of the node in most cases. We
         // should be checking the amount of memory available to guard
         // this eval
-        if (param_size >= max_param_size ||
-            info.total_buffer_size * 2 > lock_bytes) {
-            return false;
+        if (param_size >= max_param_size) {
+            return kJITHeuristics::KernelParameterSize;
+        }
+        if (info.total_buffer_size * 2 > lock_bytes) {
+            return kJITHeuristics::MemoryPressure;
         }
     }
-    return true;
+    return kJITHeuristics::Pass;
 }
 
 template<typename T>
@@ -422,7 +426,7 @@ void Array<T>::setDataDims(const dim4 &new_dims) {
     template void writeDeviceDataArray<T>(                                    \
         Array<T> & arr, const void *const data, const size_t bytes);          \
     template void evalMultiple<T>(std::vector<Array<T> *> arrays);            \
-    template bool passesJitHeuristics<T>(Node * n);                           \
+    template kJITHeuristics passesJitHeuristics<T>(Node * n);                 \
     template void Array<T>::setDataDims(const dim4 &new_dims);
 
 INSTANTIATE(float)

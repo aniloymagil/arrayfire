@@ -24,10 +24,7 @@
 
 // Includes one of the supported OpenCL BLAS back-ends (e.g. clBLAS, CLBlast)
 #include <magma/magma_blas.h>
-
-#if defined(WITH_LINEAR_ALGEBRA)
 #include <cpu/cpu_blas.hpp>
-#endif
 
 using common::half;
 
@@ -166,5 +163,6 @@ INSTANTIATE_DOT(float)
 INSTANTIATE_DOT(double)
 INSTANTIATE_DOT(cfloat)
 INSTANTIATE_DOT(cdouble)
+INSTANTIATE_DOT(half)
 
 }  // namespace opencl
