@@ -8,73 +8,56 @@
  ********************************************************/
 
 #include <Array.hpp>
+#include <common/compile_module.hpp>
 #include <common/dispatch.hpp>
+#include <common/jit/ModdimNode.hpp>
 #include <common/jit/Node.hpp>
+#include <common/jit/NodeIterator.hpp>
+#include <common/kernel_cache.hpp>
+#include <common/util.hpp>
 #include <copy.hpp>
+#include <device_manager.hpp>
 #include <err_opencl.hpp>
 #include <kernel_headers/jit.hpp>
-#include <program.hpp>
 #include <af/dim4.hpp>
 #include <af/opencl.h>
 
+#include <jit/BufferNode.hpp>
+
+#include <cstdio>
 #include <functional>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
+using common::getFuncName;
 using common::Node;
 using common::Node_ids;
 using common::Node_map_t;
 
-using cl::Buffer;
-using cl::EnqueueArgs;
 using cl::Kernel;
-using cl::KernelFunctor;
 using cl::NDRange;
 using cl::NullRange;
-using cl::Program;
 
-using std::hash;
 using std::string;
 using std::stringstream;
+using std::to_string;
 using std::vector;
 
 namespace opencl {
 
-static string getFuncName(const vector<Node *> &output_nodes,
-                          const vector<const Node *> &full_nodes,
-                          const vector<Node_ids> &full_ids, bool is_linear) {
-    stringstream hashName;
-    stringstream funcName;
-
-    if (is_linear) {
-        funcName << "L_";
-    } else {
-        funcName << "G_";
-    }
-
-    for (auto node : output_nodes) { funcName << node->getNameStr() << "_"; }
-
-    for (int i = 0; i < (int)full_nodes.size(); i++) {
-        full_nodes[i]->genKerName(funcName, full_ids[i]);
-    }
-
-    hash<string> hash_fn;
-    hashName << "KER" << hash_fn(funcName.str());
-    return hashName.str();
-}
-
-static string getKernelString(const string funcName,
-                              const vector<const Node *> &full_nodes,
-                              const vector<Node_ids> &full_ids,
-                              const vector<int> &output_ids, bool is_linear) {
+string getKernelString(const string &funcName, const vector<Node *> &full_nodes,
+                       const vector<Node_ids> &full_ids,
+                       const vector<int> &output_ids, bool is_linear) {
     // Common OpenCL code
     // This part of the code does not change with the kernel.
 
     static const char *kernelVoid = "__kernel void\n";
     static const char *dimParams =
         "KParam oInfo, uint groups_0, uint groups_1, uint num_odims";
-    static const char *blockStart = "{\n\n";
-    static const char *blockEnd   = "\n\n}";
+    static const char *blockStart = "{\n";
+    static const char *blockEnd   = "\n}\n";
 
     static const char *linearIndex = R"JIT(
         uint groupId  = get_group_id(1) * get_num_groups(0) + get_group_id(0);
@@ -119,7 +102,7 @@ static string getKernelString(const string funcName,
     stringstream offsetsStream;
     stringstream opsStream;
 
-    for (int i = 0; i < (int)full_nodes.size(); i++) {
+    for (size_t i = 0; i < full_nodes.size(); i++) {
         const auto &node     = full_nodes[i];
         const auto &ids_curr = full_ids[i];
         // Generate input parameters, only needs current id
@@ -130,8 +113,7 @@ static string getKernelString(const string funcName,
         node->genFuncs(opsStream, ids_curr);
     }
 
-    for (int i = 0; i < (int)output_ids.size(); i++) {
-        int id = output_ids[i];
+    for (int id : output_ids) {
         // Generate output parameters
         outParamStream << "__global " << full_nodes[id]->getTypeStr() << " *out"
                        << id << ", \n";
@@ -162,72 +144,123 @@ static string getKernelString(const string funcName,
     return kerStream.str();
 }
 
-static Kernel getKernel(const vector<Node *> &output_nodes,
-                        const vector<int> &output_ids,
-                        const vector<const Node *> &full_nodes,
-                        const vector<Node_ids> &full_ids,
-                        const bool is_linear) {
-    string funcName =
+cl::Kernel getKernel(const vector<Node *> &output_nodes,
+                     const vector<int> &output_ids,
+                     const vector<Node *> &full_nodes,
+                     const vector<Node_ids> &full_ids, const bool is_linear) {
+    const string funcName =
         getFuncName(output_nodes, full_nodes, full_ids, is_linear);
-    int device = getActiveDeviceId();
+    const size_t moduleKey = deterministicHash(funcName);
 
-    kc_entry_t entry = kernelCache(device, funcName);
+    // A forward lookup in module cache helps avoid recompiling the jit
+    // source generated from identical jit-trees. It also enables us
+    // with a way to save jit kernels to disk only once
+    auto entry = common::findModule(getActiveDeviceId(), moduleKey);
 
-    if (entry.prog == 0 && entry.ker == 0) {
-        string jit_ker = getKernelString(funcName, full_nodes, full_ids,
-                                         output_ids, is_linear);
-        saveKernel(funcName, jit_ker, ".cl");
-        const char *ker_strs[] = {jit_cl, jit_ker.c_str()};
-        const int ker_lens[]   = {jit_cl_len, (int)jit_ker.size()};
+    if (!entry) {
+        string jitKer = getKernelString(funcName, full_nodes, full_ids,
+                                        output_ids, is_linear);
+        common::Source jitKer_cl_src{
+            jitKer.data(), jitKer.size(),
+            deterministicHash(jitKer.data(), jitKer.size())};
+        int device = getActiveDeviceId();
+        vector<string> options;
+        if (isDoubleSupported(device)) {
+            options.emplace_back(DefineKey(USE_DOUBLE));
+        }
+        if (isHalfSupported(device)) {
+            options.emplace_back(DefineKey(USE_HALF));
+        }
 
-        Program prog;
-        buildProgram(
-            prog, 2, ker_strs, ker_lens,
-            (isDoubleSupported(device) ? string(" -D USE_DOUBLE") : string("")) +
-            (isHalfSupported(device) ? string(" -D USE_HALF") : string(""))
-                     );
+        saveKernel(funcName, jitKer, ".cl");
 
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, funcName.c_str());
-
-        addKernelToCache(device, funcName, entry);
+        return common::getKernel(funcName, {jit_cl_src, jitKer_cl_src}, {},
+                                 options, true)
+            .get();
     }
-
-    return *entry.ker;
+    return common::getKernel(entry, funcName, true).get();
 }
 
-void evalNodes(vector<Param> &outputs, vector<Node *> output_nodes) {
-    if (outputs.size() == 0) return;
+void evalNodes(vector<Param> &outputs, const vector<Node *> &output_nodes) {
+    if (outputs.empty()) { return; }
 
     // Assume all ouputs are of same size
     // FIXME: Add assert to check if all outputs are same size?
-    KParam out_info = outputs[0].info;
+    KParam out_info    = outputs[0].info;
+    dim_t *outDims     = out_info.dims;
+    size_t numOutElems = outDims[0] * outDims[1] * outDims[2] * outDims[3];
+    if (numOutElems == 0) { return; }
 
     // Use thread local to reuse the memory every time you are here.
     thread_local Node_map_t nodes;
-    thread_local vector<const Node *> full_nodes;
+    thread_local vector<Node *> full_nodes;
     thread_local vector<Node_ids> full_ids;
     thread_local vector<int> output_ids;
 
     // Reserve some space to improve performance at smaller sizes
-    if (nodes.size() == 0) {
+    if (nodes.empty()) {
         nodes.reserve(1024);
         output_ids.reserve(output_nodes.size());
         full_nodes.reserve(1024);
         full_ids.reserve(1024);
     }
 
-    for (auto &node : output_nodes) {
+    for (auto *node : output_nodes) {
         int id = node->getNodesMap(nodes, full_nodes, full_ids);
         output_ids.push_back(id);
     }
 
+    using common::ModdimNode;
+    using common::NodeIterator;
+    using jit::BufferNode;
+
+    // find all moddims in the tree
+    vector<std::shared_ptr<Node>> node_clones;
+    for (auto *node : full_nodes) { node_clones.emplace_back(node->clone()); }
+
+    for (common::Node_ids ids : full_ids) {
+        auto &children = node_clones[ids.id]->m_children;
+        for (int i = 0; i < Node::kMaxChildren && children[i] != nullptr; i++) {
+            children[i] = node_clones[ids.child_ids[i]];
+        }
+    }
+
+    for (auto &node : node_clones) {
+        if (node->getOp() == af_moddims_t) {
+            ModdimNode *mn = static_cast<ModdimNode *>(node.get());
+            auto isBuffer  = [](const Node &ptr) { return ptr.isBuffer(); };
+
+            NodeIterator<> it(node.get());
+            auto new_strides = calcStrides(mn->m_new_shape);
+            while (it != NodeIterator<>()) {
+                it = find_if(it, NodeIterator<>(), isBuffer);
+                if (it == NodeIterator<>()) { break; }
+
+                BufferNode *buf = static_cast<BufferNode *>(&(*it));
+
+                buf->m_param.dims[0]    = mn->m_new_shape[0];
+                buf->m_param.dims[1]    = mn->m_new_shape[1];
+                buf->m_param.dims[2]    = mn->m_new_shape[2];
+                buf->m_param.dims[3]    = mn->m_new_shape[3];
+                buf->m_param.strides[0] = new_strides[0];
+                buf->m_param.strides[1] = new_strides[1];
+                buf->m_param.strides[2] = new_strides[2];
+                buf->m_param.strides[3] = new_strides[3];
+
+                ++it;
+            }
+        }
+    }
+
+    full_nodes.clear();
+    for (auto &node : node_clones) { full_nodes.push_back(node.get()); }
+
     bool is_linear = true;
-    for (auto node : full_nodes) {
+    for (auto *node : full_nodes) {
         is_linear &= node->isLinear(outputs[0].info.dims);
     }
 
-    Kernel ker =
+    auto ker =
         getKernel(output_nodes, output_ids, full_nodes, full_ids, is_linear);
 
     uint local_0   = 1;
@@ -243,29 +276,30 @@ void evalNodes(vector<Param> &outputs, vector<Node *> output_nodes) {
         (getActiveDeviceType() == AFCL_DEVICE_TYPE_CPU) ? 1024 : 256;
 
     while (num_odims >= 1) {
-        if (out_info.dims[num_odims - 1] == 1)
+        if (outDims[num_odims - 1] == 1) {
             num_odims--;
-        else
+        } else {
             break;
+        }
     }
 
     if (is_linear) {
         local_0           = work_group_size;
-        uint out_elements = out_info.dims[3] * out_info.strides[3];
+        uint out_elements = outDims[3] * out_info.strides[3];
         uint groups       = divup(out_elements, local_0);
 
-        global_1 = divup(groups, 1000) * local_1;
+        global_1 = divup(groups, work_group_size) * local_1;
         global_0 = divup(groups, global_1) * local_0;
 
     } else {
         local_1 = 4;
         local_0 = work_group_size / local_1;
 
-        groups_0 = divup(out_info.dims[0], local_0);
-        groups_1 = divup(out_info.dims[1], local_1);
+        groups_0 = divup(outDims[0], local_0);
+        groups_1 = divup(outDims[1], local_1);
 
-        global_0 = groups_0 * local_0 * out_info.dims[2];
-        global_1 = groups_1 * local_1 * out_info.dims[3];
+        global_0 = groups_0 * local_0 * outDims[2];
+        global_1 = groups_1 * local_1 * outDims[3];
     }
 
     NDRange local(local_0, local_1);
@@ -274,13 +308,13 @@ void evalNodes(vector<Param> &outputs, vector<Node *> output_nodes) {
     int nargs = 0;
     for (const auto &node : full_nodes) {
         nargs = node->setArgs(nargs, is_linear,
-                              [&](int id, const void *ptr, size_t arg_size) {
+                              [&ker](int id, const void *ptr, size_t arg_size) {
                                   ker.setArg(id, arg_size, ptr);
                               });
     }
 
     // Set output parameters
-    for (auto output : outputs) {
+    for (auto &output : outputs) {
         ker.setArg(nargs, *(output.data));
         ++nargs;
     }

@@ -8,96 +8,72 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
-#include <cache.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
+#include <kernel/config.hpp>
+#include <kernel/interp.hpp>
 #include <kernel_headers/approx1.hpp>
 #include <kernel_headers/approx2.hpp>
 #include <kernel_headers/interp.hpp>
 #include <math.hpp>
-#include <program.hpp>
 #include <traits.hpp>
-#include <type_util.hpp>
-#include <string>
-#include "config.hpp"
-#include "interp.hpp"
 
-using cl::Buffer;
-using cl::EnqueueArgs;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::NDRange;
-using cl::Program;
-using std::string;
+#include <string>
+#include <vector>
 
 namespace opencl {
 namespace kernel {
-static const int TX = 16;
-static const int TY = 16;
 
-static const int THREADS = 256;
+template<typename Ty, typename Tp>
+auto genCompileOptions(const int order, const int xdim, const int ydim = -1) {
+    constexpr bool isComplex =
+        static_cast<af_dtype>(dtype_traits<Ty>::af_type) == c32 ||
+        static_cast<af_dtype>(dtype_traits<Ty>::af_type) == c64;
 
-template<typename Ty, typename Tp, int order>
-std::string generateOptionsString() {
     ToNumStr<Ty> toNumStr;
 
-    std::ostringstream options;
-    options << " -D Ty=" << dtype_traits<Ty>::getName()
-            << " -D Tp=" << dtype_traits<Tp>::getName()
-            << " -D InterpInTy=" << dtype_traits<Ty>::getName()
-            << " -D InterpValTy=" << dtype_traits<Ty>::getName()
-            << " -D InterpPosTy=" << dtype_traits<Tp>::getName()
-            << " -D ZERO=" << toNumStr(scalar<Ty>(0));
+    std::vector<std::string> compileOpts = {
+        DefineKeyValue(Ty, dtype_traits<Ty>::getName()),
+        DefineKeyValue(Tp, dtype_traits<Tp>::getName()),
+        DefineKeyValue(InterpInTy, dtype_traits<Ty>::getName()),
+        DefineKeyValue(InterpValTy, dtype_traits<Ty>::getName()),
+        DefineKeyValue(InterpPosTy, dtype_traits<Tp>::getName()),
+        DefineKeyValue(ZERO, toNumStr(scalar<Ty>(0))),
+        DefineKeyValue(XDIM, xdim),
+        DefineKeyValue(INTERP_ORDER, order),
+        DefineKeyValue(IS_CPLX, (isComplex ? 1 : 0)),
+    };
+    if (ydim != -1) { compileOpts.emplace_back(DefineKeyValue(YDIM, ydim)); }
+    compileOpts.emplace_back(getTypeBuildDefinition<Ty>());
+    addInterpEnumOptions(compileOpts);
 
-    if ((af_dtype)dtype_traits<Ty>::af_type == c32 ||
-        (af_dtype)dtype_traits<Ty>::af_type == c64) {
-        options << " -D IS_CPLX=1";
-    } else {
-        options << " -D IS_CPLX=0";
-    }
-    if (std::is_same<Ty, double>::value || std::is_same<Ty, cdouble>::value) {
-        options << " -D USE_DOUBLE";
-    }
-
-    options << " -D INTERP_ORDER=" << order;
-    addInterpEnumOptions(options);
-
-    return options.str();
+    return compileOpts;
 }
 
-///////////////////////////////////////////////////////////////////////////
-// Wrapper functions
-///////////////////////////////////////////////////////////////////////////
-template<typename Ty, typename Tp, int order>
+template<typename Ty, typename Tp>
 void approx1(Param yo, const Param yi, const Param xo, const int xdim,
              const Tp xi_beg, const Tp xi_step, const float offGrid,
-             af_interp_type method) {
-    std::string refName = std::string("approx1_kernel_") +
-                          std::string(dtype_traits<Ty>::getName()) +
-                          std::string(dtype_traits<Tp>::getName()) +
-                          std::to_string(order);
+             const af_interp_type method, const int order) {
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::string;
+    using std::vector;
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
+    constexpr int THREADS = 256;
 
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::string options = generateOptionsString<Ty, Tp, order>();
+    vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<Ty>(),
+        TemplateTypename<Tp>(),
+        TemplateArg(xdim),
+        TemplateArg(order),
+    };
+    auto compileOpts = genCompileOptions<Ty, Tp>(order, xdim);
 
-        const char *ker_strs[] = {interp_cl, approx1_cl};
-        const int ker_lens[]   = {interp_cl_len, approx1_cl_len};
-        Program prog;
-        buildProgram(prog, 2, ker_strs, ker_lens, options);
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "approx1_kernel");
-
-        addKernelToCache(device, refName, entry);
-    }
-
-    auto approx1Op =
-        KernelFunctor<Buffer, const KParam, const Buffer, const KParam,
-                      const Buffer, const KParam, const int, const Tp, const Tp,
-                      const Ty, const int, const int, const int>(*entry.ker);
+    auto approx1 = common::getKernel("approx1", {interp_cl_src, approx1_cl_src},
+                                     tmpltArgs, compileOpts);
 
     NDRange local(THREADS, 1, 1);
     dim_t blocksPerMat = divup(yo.info.dims[0], local[0]);
@@ -108,45 +84,34 @@ void approx1(Param yo, const Param yi, const Param xo, const int xdim,
     bool batch =
         !(xo.info.dims[1] == 1 && xo.info.dims[2] == 1 && xo.info.dims[3] == 1);
 
-    approx1Op(EnqueueArgs(getQueue(), global, local), *yo.data, yo.info,
-              *yi.data, yi.info, *xo.data, xo.info, xdim, xi_beg, xi_step,
-              scalar<Ty>(offGrid), blocksPerMat, (int)batch, (int)method);
-
+    approx1(EnqueueArgs(getQueue(), global, local), *yo.data, yo.info, *yi.data,
+            yi.info, *xo.data, xo.info, xi_beg, Tp(1) / xi_step,
+            scalar<Ty>(offGrid), (int)blocksPerMat, (int)batch, (int)method);
     CL_DEBUG_FINISH(getQueue());
 }
 
-template<typename Ty, typename Tp, int order>
+template<typename Ty, typename Tp>
 void approx2(Param zo, const Param zi, const Param xo, const int xdim,
              const Tp &xi_beg, const Tp &xi_step, const Param yo,
              const int ydim, const Tp &yi_beg, const Tp &yi_step,
-             const float offGrid, af_interp_type method) {
-    std::string refName = std::string("approx2_kernel_") +
-                          std::string(dtype_traits<Ty>::getName()) +
-                          std::string(dtype_traits<Tp>::getName()) +
-                          std::to_string(order);
+             const float offGrid, const af_interp_type method,
+             const int order) {
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::string;
+    using std::vector;
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
+    constexpr int TX = 16;
+    constexpr int TY = 16;
 
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::string options = generateOptionsString<Ty, Tp, order>();
+    vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<Ty>(), TemplateTypename<Tp>(), TemplateArg(xdim),
+        TemplateArg(ydim),      TemplateArg(order),
+    };
+    auto compileOpts = genCompileOptions<Ty, Tp>(order, xdim, ydim);
 
-        const char *ker_strs[] = {interp_cl, approx2_cl};
-        const int ker_lens[]   = {interp_cl_len, approx2_cl_len};
-        Program prog;
-        buildProgram(prog, 2, ker_strs, ker_lens, options);
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "approx2_kernel");
-
-        addKernelToCache(device, refName, entry);
-    }
-
-    auto approx2Op =
-        KernelFunctor<Buffer, const KParam, const Buffer, const KParam,
-                      const Buffer, const KParam, const int, const Buffer,
-                      const KParam, const int, const Tp, const Tp, const Tp,
-                      const Tp, const Ty, const int, const int, const int,
-                      const int>(*entry.ker);
+    auto approx2 = common::getKernel("approx2", {interp_cl_src, approx2_cl_src},
+                                     tmpltArgs, compileOpts);
 
     NDRange local(TX, TY, 1);
     dim_t blocksPerMatX = divup(zo.info.dims[0], local[0]);
@@ -157,11 +122,11 @@ void approx2(Param zo, const Param zi, const Param xo, const int xdim,
     // Passing bools to opencl kernels is not allowed
     bool batch = !(xo.info.dims[2] == 1 && xo.info.dims[3] == 1);
 
-    approx2Op(EnqueueArgs(getQueue(), global, local), *zo.data, zo.info,
-              *zi.data, zi.info, *xo.data, xo.info, xdim, *yo.data, yo.info,
-              ydim, xi_beg, xi_step, yi_beg, yi_step, scalar<Ty>(offGrid),
-              blocksPerMatX, blocksPerMatY, (int)batch, (int)method);
-
+    approx2(EnqueueArgs(getQueue(), global, local), *zo.data, zo.info, *zi.data,
+            zi.info, *xo.data, xo.info, *yo.data, yo.info, xi_beg,
+            Tp(1) / xi_step, yi_beg, Tp(1) / yi_step, scalar<Ty>(offGrid),
+            static_cast<int>(blocksPerMatX), static_cast<int>(blocksPerMatY),
+            static_cast<int>(batch), static_cast<int>(method));
     CL_DEBUG_FINISH(getQueue());
 }
 }  // namespace kernel

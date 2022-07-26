@@ -13,8 +13,9 @@
 
 #include <GraphicsResourceManager.hpp>
 #include <blas.hpp>
-#include <cache.hpp>
 #include <clfft.hpp>
+#include <common/DefaultMemoryManager.hpp>
+#include <common/Logger.hpp>
 #include <common/host_memory.hpp>
 #include <common/util.hpp>
 #include <device_manager.hpp>
@@ -22,6 +23,7 @@
 #include <errorcodes.hpp>
 #include <version.hpp>
 #include <af/version.h>
+#include <memory>
 
 #ifdef OS_MAC
 #include <OpenGL/CGLCurrent.h>
@@ -30,9 +32,8 @@
 #include <boost/compute/context.hpp>
 #include <boost/compute/utility/program_cache.hpp>
 
-#include <algorithm>
 #include <cctype>
-#include <cstring>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -53,18 +54,24 @@ using std::endl;
 using std::find_if;
 using std::get;
 using std::make_pair;
+using std::make_unique;
 using std::map;
+using std::move;
 using std::once_flag;
 using std::ostringstream;
 using std::pair;
-using std::ptr_fun;
 using std::string;
 using std::to_string;
+using std::unique_ptr;
 using std::vector;
+
+using common::memory::MemoryManagerBase;
+using opencl::Allocator;
+using opencl::AllocatorPinned;
 
 namespace opencl {
 
-static const string get_system(void) {
+static string get_system() {
     string arch = (sizeof(void*) == 4) ? "32-bit " : "64-bit ";
 
     return arch +
@@ -79,21 +86,24 @@ static const string get_system(void) {
 
 int getBackend() { return AF_BACKEND_OPENCL; }
 
-// http://stackoverflow.com/questions/216823/whats-the-best-way-to-trim-stdstring/217605#217605
-// trim from start
-static inline string& ltrim(string& s) {
-    s.erase(s.begin(),
-            find_if(s.begin(), s.end(), not1(ptr_fun<int, int>(isspace))));
-    return s;
+bool verify_present(const string& pname, const string ref) {
+    auto iter =
+        search(begin(pname), end(pname), begin(ref), end(ref),
+               [](const string::value_type& l, const string::value_type& r) {
+                   return tolower(l) == tolower(r);
+               });
+
+    return iter != end(pname);
 }
 
 static string platformMap(string& platStr) {
-    typedef map<string, string> strmap_t;
+    using strmap_t                = map<string, string>;
     static const strmap_t platMap = {
         make_pair("NVIDIA CUDA", "NVIDIA"),
         make_pair("Intel(R) OpenCL", "INTEL"),
         make_pair("AMD Accelerated Parallel Processing", "AMD"),
         make_pair("Intel Gen OCL Driver", "BEIGNET"),
+        make_pair("Intel(R) OpenCL HD Graphics", "INTEL"),
         make_pair("Apple", "APPLE"),
         make_pair("Portable Computing Language", "POCL"),
     };
@@ -107,48 +117,71 @@ static string platformMap(string& platStr) {
     }
 }
 
-string getDeviceInfo() {
-    DeviceManager& devMngr = DeviceManager::getInstance();
+afcl::platform getPlatformEnum(cl::Device dev) {
+    string pname = getPlatformName(dev);
+    if (verify_present(pname, "AMD"))
+        return AFCL_PLATFORM_AMD;
+    else if (verify_present(pname, "NVIDIA"))
+        return AFCL_PLATFORM_NVIDIA;
+    else if (verify_present(pname, "INTEL"))
+        return AFCL_PLATFORM_INTEL;
+    else if (verify_present(pname, "APPLE"))
+        return AFCL_PLATFORM_APPLE;
+    else if (verify_present(pname, "BEIGNET"))
+        return AFCL_PLATFORM_BEIGNET;
+    else if (verify_present(pname, "POCL"))
+        return AFCL_PLATFORM_POCL;
+    return AFCL_PLATFORM_UNKNOWN;
+}
 
-    vector<cl::Device*> devices;
-    {
-        common::lock_guard_t lock(devMngr.deviceMutex);
-        devices = devMngr.mDevices;
-    }
-
+string getDeviceInfo() noexcept {
     ostringstream info;
     info << "ArrayFire v" << AF_VERSION << " (OpenCL, " << get_system()
          << ", build " << AF_REVISION << ")\n";
 
-    unsigned nDevices = 0;
-    for (auto device : devices) {
-        const Platform platform(device->getInfo<CL_DEVICE_PLATFORM>());
+    vector<cl::Device*> devices;
+    try {
+        DeviceManager& devMngr = DeviceManager::getInstance();
 
-        string dstr      = device->getInfo<CL_DEVICE_NAME>();
-        bool show_braces = ((unsigned)getActiveDeviceId() == nDevices);
+        common::lock_guard_t lock(devMngr.deviceMutex);
+        unsigned nDevices = 0;
+        for (auto& device : devMngr.mDevices) {
+            const Platform platform(device->getInfo<CL_DEVICE_PLATFORM>());
 
-        string id = (show_braces ? string("[") : "-") + to_string(nDevices) +
-                    (show_braces ? string("]") : "-");
+            string dstr = device->getInfo<CL_DEVICE_NAME>();
+            bool show_braces =
+                (static_cast<unsigned>(getActiveDeviceId()) == nDevices);
 
-        size_t msize = device->getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
-        info << id << " " << getPlatformName(*device) << ": " << ltrim(dstr)
-             << ", " << msize / 1048576 << " MB";
+            string id = (show_braces ? string("[") : "-") +
+                        to_string(nDevices) + (show_braces ? string("]") : "-");
+
+            size_t msize = device->getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+            info << id << " " << getPlatformName(*device) << ": " << ltrim(dstr)
+                 << ", " << msize / 1048576 << " MB";
 #ifndef NDEBUG
-        info << " -- ";
-        string devVersion = device->getInfo<CL_DEVICE_VERSION>();
-        string driVersion = device->getInfo<CL_DRIVER_VERSION>();
-        info << devVersion;
-        info << " -- Device driver " << driVersion;
-        info << " -- FP64 Support: "
-             << (device->getInfo<CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE>() > 0
-                     ? "True"
-                     : "False");
-        info << " -- Unified Memory ("
-             << (isHostUnifiedMemory(*device) ? "True" : "False") << ")";
+            info << " -- ";
+            string devVersion = device->getInfo<CL_DEVICE_VERSION>();
+            string driVersion = device->getInfo<CL_DRIVER_VERSION>();
+            info << devVersion;
+            info << " -- Device driver " << driVersion;
+            info
+                << " -- FP64 Support: "
+                << (device->getInfo<CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE>() >
+                            0
+                        ? "True"
+                        : "False");
+            info << " -- Unified Memory ("
+                 << (isHostUnifiedMemory(*device) ? "True" : "False") << ")";
 #endif
-        info << endl;
+            info << endl;
 
-        nDevices++;
+            nDevices++;
+        }
+    } catch (const AfError& err) {
+        UNUSED(err);
+        info << "No platforms found.\n";
+        // Don't throw an exception here. Info should pass even if the system
+        // doesn't have the correct drivers installed.
     }
     return info.str();
 }
@@ -173,15 +206,24 @@ void setActiveContext(int device) {
     tlocalActiveDeviceId() = make_pair(device, device);
 }
 
-int getDeviceCount() {
+int getDeviceCount() noexcept try {
     DeviceManager& devMngr = DeviceManager::getInstance();
 
     common::lock_guard_t lock(devMngr.deviceMutex);
-
-    return devMngr.mQueues.size();
+    return static_cast<int>(devMngr.mQueues.size());
+} catch (const AfError& err) {
+    UNUSED(err);
+    // If device manager threw an error then return 0 because no platforms
+    // were found
+    return 0;
 }
 
-int getActiveDeviceId() {
+void init() {
+    thread_local const DeviceManager& devMngr = DeviceManager::getInstance();
+    UNUSED(devMngr);
+}
+
+unsigned getActiveDeviceId() {
     // Second element is the queue id, which is
     // what we mean by active device id in opencl backend
     return get<1>(tlocalActiveDeviceId());
@@ -192,10 +234,10 @@ int getDeviceIdFromNativeId(cl_device_id id) {
 
     common::lock_guard_t lock(devMngr.deviceMutex);
 
-    int nDevices = devMngr.mDevices.size();
+    int nDevices = static_cast<int>(devMngr.mDevices.size());
     int devId    = 0;
     for (devId = 0; devId < nDevices; ++devId) {
-        if (id == devMngr.mDevices[devId]->operator()()) break;
+        if (id == devMngr.mDevices[devId]->operator()()) { break; }
     }
 
     return devId;
@@ -243,7 +285,7 @@ CommandQueue& getQueue() {
 const cl::Device& getDevice(int id) {
     device_id_t& devId = tlocalActiveDeviceId();
 
-    if (id == -1) id = get<1>(devId);
+    if (id == -1) { id = get<1>(devId); }
 
     DeviceManager& devMngr = DeviceManager::getInstance();
 
@@ -267,8 +309,8 @@ size_t getDeviceMemorySize(int device) {
 size_t getHostMemorySize() { return common::getHostMemorySize(); }
 
 cl_device_type getDeviceType() {
-    cl::Device device   = getDevice();
-    cl_device_type type = device.getInfo<CL_DEVICE_TYPE>();
+    const cl::Device& device = getDevice();
+    cl_device_type type      = device.getInfo<CL_DEVICE_TYPE>();
     return type;
 }
 
@@ -279,7 +321,7 @@ bool isHostUnifiedMemory(const cl::Device& device) {
 bool OpenCLCPUOffload(bool forceOffloadOSX) {
     static const bool offloadEnv = getEnvVar("AF_OPENCL_CPU_OFFLOAD") != "0";
     bool offload                 = false;
-    if (offloadEnv) offload = isHostUnifiedMemory(getDevice());
+    if (offloadEnv) { offload = isHostUnifiedMemory(getDevice()); }
 #if OS_MAC
     // FORCED OFFLOAD FOR LAPACK FUNCTIONS ON OSX UNIFIED MEMORY DEVICES
     //
@@ -310,7 +352,7 @@ bool isGLSharingSupported() {
     return devMngr.mIsGLSharingOn[get<1>(devId)];
 }
 
-bool isDoubleSupported(int device) {
+bool isDoubleSupported(unsigned device) {
     DeviceManager& devMngr = DeviceManager::getInstance();
 
     cl::Device dev;
@@ -318,11 +360,12 @@ bool isDoubleSupported(int device) {
         common::lock_guard_t lock(devMngr.deviceMutex);
         dev = *devMngr.mDevices[device];
     }
-
-    return (dev.getInfo<CL_DEVICE_PREFERRED_VECTOR_WIDTH_DOUBLE>() > 0);
+    // 64bit fp is an optional extension
+    return (dev.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_fp64") !=
+            string::npos);
 }
 
-bool isHalfSupported(int device) {
+bool isHalfSupported(unsigned device) {
     DeviceManager& devMngr = DeviceManager::getInstance();
 
     cl::Device dev;
@@ -330,62 +373,63 @@ bool isHalfSupported(int device) {
         common::lock_guard_t lock(devMngr.deviceMutex);
         dev = *devMngr.mDevices[device];
     }
-    return (dev.getInfo<CL_DEVICE_PREFERRED_VECTOR_WIDTH_HALF>() > 0);
+    // 16bit fp is an option extension
+    return (dev.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_khr_fp16") !=
+            string::npos);
 }
 
 void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute) {
-    unsigned nDevices        = 0;
-    unsigned currActiveDevId = (unsigned)getActiveDeviceId();
-    bool devset              = false;
+    unsigned nDevices    = 0;
+    auto currActiveDevId = static_cast<unsigned>(getActiveDeviceId());
+    bool devset          = false;
 
     DeviceManager& devMngr = DeviceManager::getInstance();
 
-    vector<cl::Context*> contexts;
     {
         common::lock_guard_t lock(devMngr.deviceMutex);
-        contexts = devMngr.mContexts;  // NOTE: copy, not a reference
-    }
 
-    for (auto context : contexts) {
-        vector<Device> devices = context->getInfo<CL_CONTEXT_DEVICES>();
+        for (auto& context : devMngr.mContexts) {
+            vector<Device> devices = context->getInfo<CL_CONTEXT_DEVICES>();
 
-        for (auto& device : devices) {
-            const Platform platform(device.getInfo<CL_DEVICE_PLATFORM>());
-            string platStr = platform.getInfo<CL_PLATFORM_NAME>();
+            for (auto& device : devices) {
+                const Platform platform(device.getInfo<CL_DEVICE_PLATFORM>());
+                string platStr = platform.getInfo<CL_PLATFORM_NAME>();
 
-            if (currActiveDevId == nDevices) {
-                string dev_str;
-                device.getInfo(CL_DEVICE_NAME, &dev_str);
-                string com_str = device.getInfo<CL_DEVICE_VERSION>();
-                com_str        = com_str.substr(7, 3);
+                if (currActiveDevId == nDevices) {
+                    string dev_str;
+                    device.getInfo(CL_DEVICE_NAME, &dev_str);
+                    string com_str = device.getInfo<CL_DEVICE_VERSION>();
+                    com_str        = com_str.substr(7, 3);
 
-                // strip out whitespace from the device string:
-                const string& whitespace = " \t";
-                const auto strBegin = dev_str.find_first_not_of(whitespace);
-                const auto strEnd   = dev_str.find_last_not_of(whitespace);
-                const auto strRange = strEnd - strBegin + 1;
-                dev_str             = dev_str.substr(strBegin, strRange);
+                    // strip out whitespace from the device string:
+                    const string& whitespace = " \t";
+                    const auto strBegin = dev_str.find_first_not_of(whitespace);
+                    const auto strEnd   = dev_str.find_last_not_of(whitespace);
+                    const auto strRange = strEnd - strBegin + 1;
+                    dev_str             = dev_str.substr(strBegin, strRange);
 
-                // copy to output
-                snprintf(d_name, 64, "%s", dev_str.c_str());
-                snprintf(d_platform, 10, "OpenCL");
-                snprintf(d_toolkit, 64, "%s", platStr.c_str());
-                snprintf(d_compute, 10, "%s", com_str.c_str());
-                devset = true;
+                    // copy to output
+                    snprintf(d_name, 64, "%s", dev_str.c_str());
+                    snprintf(d_platform, 10, "OpenCL");
+                    snprintf(d_toolkit, 64, "%s", platStr.c_str());
+                    snprintf(d_compute, 10, "%s", com_str.c_str());
+                    devset = true;
+                }
+                if (devset) { break; }
+                nDevices++;
             }
-            if (devset) break;
-            nDevices++;
+            if (devset) { break; }
         }
-        if (devset) break;
     }
 
     // Sanitize input
     for (int i = 0; i < 31; i++) {
         if (d_name[i] == ' ') {
-            if (d_name[i + 1] == 0 || d_name[i + 1] == ' ')
+            if (d_name[i + 1] == 0 || d_name[i + 1] == ' ') {
                 d_name[i] = 0;
-            else
+            } else {
                 d_name[i] = '_';
+            }
         }
     }
 }
@@ -395,8 +439,8 @@ int setDevice(int device) {
 
     common::lock_guard_t lock(devMngr.deviceMutex);
 
-    if (device >= (int)devMngr.mQueues.size() ||
-        device >= (int)DeviceManager::MAX_DEVICES) {
+    if (device >= static_cast<int>(devMngr.mQueues.size()) ||
+        device >= static_cast<int>(DeviceManager::MAX_DEVICES)) {
         return -1;
     } else {
         int old = getActiveDeviceId();
@@ -413,29 +457,27 @@ void sync(int device) {
 }
 
 void addDeviceContext(cl_device_id dev, cl_context ctx, cl_command_queue que) {
-    clRetainDevice(dev);
-    clRetainContext(ctx);
-    clRetainCommandQueue(que);
-
     DeviceManager& devMngr = DeviceManager::getInstance();
 
     int nDevices = 0;
     {
         common::lock_guard_t lock(devMngr.deviceMutex);
 
-        cl::Device* tDevice   = new cl::Device(dev);
-        cl::Context* tContext = new cl::Context(ctx);
-        cl::CommandQueue* tQueue =
-            (que == NULL ? new cl::CommandQueue(*tContext, *tDevice)
-                         : new cl::CommandQueue(que));
-        devMngr.mDevices.push_back(tDevice);
-        devMngr.mContexts.push_back(tContext);
-        devMngr.mQueues.push_back(tQueue);
+        auto tDevice  = make_unique<cl::Device>(dev, true);
+        auto tContext = make_unique<cl::Context>(ctx, true);
+        auto tQueue =
+            (que == NULL ? make_unique<cl::CommandQueue>(*tContext, *tDevice)
+                         : make_unique<cl::CommandQueue>(que, true));
         devMngr.mPlatforms.push_back(getPlatformEnum(*tDevice));
         // FIXME: add OpenGL Interop for user provided contexts later
         devMngr.mIsGLSharingOn.push_back(false);
-        devMngr.mDeviceTypes.push_back(tDevice->getInfo<CL_DEVICE_TYPE>());
-        nDevices = devMngr.mDevices.size() - 1;
+        devMngr.mDeviceTypes.push_back(
+            static_cast<int>(tDevice->getInfo<CL_DEVICE_TYPE>()));
+
+        devMngr.mDevices.push_back(move(tDevice));
+        devMngr.mContexts.push_back(move(tContext));
+        devMngr.mQueues.push_back(move(tQueue));
+        nDevices = static_cast<int>(devMngr.mDevices.size()) - 1;
 
         // cache the boost program_cache object, clean up done on program exit
         // not during removeDeviceContext
@@ -456,7 +498,7 @@ void setDeviceContext(cl_device_id dev, cl_context ctx) {
 
     common::lock_guard_t lock(devMngr.deviceMutex);
 
-    const int dCount = devMngr.mDevices.size();
+    const int dCount = static_cast<int>(devMngr.mDevices.size());
     for (int i = 0; i < dCount; ++i) {
         if (devMngr.mDevices[i]->operator()() == dev &&
             devMngr.mContexts[i]->operator()() == ctx) {
@@ -478,7 +520,7 @@ void removeDeviceContext(cl_device_id dev, cl_context ctx) {
     {
         common::lock_guard_t lock(devMngr.deviceMutex);
 
-        const int dCount = devMngr.mDevices.size();
+        const int dCount = static_cast<int>(devMngr.mDevices.size());
         for (int i = 0; i < dCount; ++i) {
             if (devMngr.mDevices[i]->operator()() == dev &&
                 devMngr.mContexts[i]->operator()() == ctx) {
@@ -488,7 +530,7 @@ void removeDeviceContext(cl_device_id dev, cl_context ctx) {
         }
     }
 
-    if (deleteIdx < (int)devMngr.mUserDeviceOffset) {
+    if (deleteIdx < static_cast<int>(devMngr.mUserDeviceOffset)) {
         AF_ERROR("Cannot pop ArrayFire internal devices", AF_ERR_ARG);
     } else if (deleteIdx == -1) {
         AF_ERROR("No matching device found", AF_ERR_ARG);
@@ -497,10 +539,6 @@ void removeDeviceContext(cl_device_id dev, cl_context ctx) {
         memoryManager().removeMemoryManagement(deleteIdx);
 
         common::lock_guard_t lock(devMngr.deviceMutex);
-        clReleaseDevice((*devMngr.mDevices[deleteIdx])());
-        clReleaseContext((*devMngr.mContexts[deleteIdx])());
-        clReleaseCommandQueue((*devMngr.mQueues[deleteIdx])());
-
         // FIXME: this case can potentially cause issues due to the
         // modification of the device pool stl containers.
 
@@ -520,9 +558,9 @@ void removeDeviceContext(cl_device_id dev, cl_context ctx) {
         // OTHERWISE, update(decrement) the thread local active device ids
         device_id_t& devId = tlocalActiveDeviceId();
 
-        if (deleteIdx < (int)devId.first) {
+        if (deleteIdx < static_cast<int>(devId.first)) {
             device_id_t newVals = make_pair(devId.first - 1, devId.second - 1);
-            devId = newVals;
+            devId               = newVals;
         }
     }
 }
@@ -532,18 +570,18 @@ bool synchronize_calls() {
     return sync;
 }
 
-unsigned getMaxJitSize() {
+int& getMaxJitSize() {
 #if defined(OS_MAC)
-    const int MAX_JIT_LEN = 50;
+    constexpr int MAX_JIT_LEN = 50;
 #else
-    const int MAX_JIT_LEN       = 100;
+    constexpr int MAX_JIT_LEN = 100;
 #endif
-
     thread_local int length = 0;
-    if (length == 0) {
+    if (length <= 0) {
         string env_var = getEnvVar("AF_OPENCL_MAX_JIT_LEN");
         if (!env_var.empty()) {
-            length = stoi(env_var);
+            int input_len = stoi(env_var);
+            length        = input_len > 0 ? input_len : MAX_JIT_LEN;
         } else {
             length = MAX_JIT_LEN;
         }
@@ -556,25 +594,60 @@ bool& evalFlag() {
     return flag;
 }
 
-MemoryManager& memoryManager() {
+MemoryManagerBase& memoryManager() {
     static once_flag flag;
 
     DeviceManager& inst = DeviceManager::getInstance();
 
-    call_once(flag, [&] { inst.memManager.reset(new MemoryManager()); });
+    call_once(flag, [&]() {
+        // By default, create an instance of the default memory manager
+        inst.memManager = make_unique<common::DefaultMemoryManager>(
+            getDeviceCount(), common::MAX_BUFFERS,
+            AF_MEM_DEBUG || AF_OPENCL_MEM_DEBUG);
+        // Set the memory manager's device memory manager
+        unique_ptr<Allocator> deviceMemoryManager;
+        deviceMemoryManager = make_unique<Allocator>();
+        inst.memManager->setAllocator(move(deviceMemoryManager));
+        inst.memManager->initialize();
+    });
 
     return *(inst.memManager.get());
 }
 
-MemoryManagerPinned& pinnedMemoryManager() {
+MemoryManagerBase& pinnedMemoryManager() {
     static once_flag flag;
 
     DeviceManager& inst = DeviceManager::getInstance();
 
-    call_once(flag,
-              [&] { inst.pinnedMemManager.reset(new MemoryManagerPinned()); });
+    call_once(flag, [&]() {
+        // By default, create an instance of the default memory manager
+        inst.pinnedMemManager = make_unique<common::DefaultMemoryManager>(
+            getDeviceCount(), common::MAX_BUFFERS,
+            AF_MEM_DEBUG || AF_OPENCL_MEM_DEBUG);
+        // Set the memory manager's device memory manager
+        unique_ptr<AllocatorPinned> deviceMemoryManager;
+        deviceMemoryManager = make_unique<AllocatorPinned>();
+        inst.pinnedMemManager->setAllocator(move(deviceMemoryManager));
+        inst.pinnedMemManager->initialize();
+    });
 
     return *(inst.pinnedMemManager.get());
+}
+
+void setMemoryManager(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManager(move(mgr));
+}
+
+void resetMemoryManager() {
+    return DeviceManager::getInstance().resetMemoryManager();
+}
+
+void setMemoryManagerPinned(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManagerPinned(move(mgr));
+}
+
+void resetMemoryManagerPinned() {
+    return DeviceManager::getInstance().resetMemoryManagerPinned();
 }
 
 graphics::ForgeManager& forgeManager() {
@@ -589,7 +662,7 @@ GraphicsResourceManager& interopManager() {
     DeviceManager& inst = DeviceManager::getInstance();
 
     call_once(initFlags[id], [&] {
-        inst.gfxManagers[id].reset(new GraphicsResourceManager());
+        inst.gfxManagers[id] = make_unique<GraphicsResourceManager>();
     });
 
     return *(inst.gfxManagers[id].get());
@@ -601,35 +674,13 @@ PlanCache& fftManager() {
     return clfftManagers[getActiveDeviceId()];
 }
 
-kc_t& getKernelCache(int device) {
-    thread_local kc_t kernelCaches[DeviceManager::MAX_DEVICES];
-
-    return kernelCaches[device];
-}
-
-void addKernelToCache(int device, const string& key, const kc_entry_t entry) {
-    getKernelCache(device).emplace(key, entry);
-}
-
-void removeKernelFromCache(int device, const string& key) {
-    getKernelCache(device).erase(key);
-}
-
-kc_entry_t kernelCache(int device, const string& key) {
-    kc_t& cache = getKernelCache(device);
-
-    kc_t::iterator iter = cache.find(key);
-
-    return (iter == cache.end() ? kc_entry_t{0, 0} : iter->second);
-}
-
 }  // namespace opencl
 
 using namespace opencl;
 
 af_err afcl_get_device_type(afcl_device_type* res) {
     try {
-        *res = (afcl_device_type)getActiveDeviceType();
+        *res = static_cast<afcl_device_type>(getActiveDeviceType());
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -637,7 +688,7 @@ af_err afcl_get_device_type(afcl_device_type* res) {
 
 af_err afcl_get_platform(afcl_platform* res) {
     try {
-        *res = (afcl_platform)getActivePlatform();
+        *res = static_cast<afcl_platform>(getActivePlatform());
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -646,7 +697,7 @@ af_err afcl_get_platform(afcl_platform* res) {
 af_err afcl_get_context(cl_context* ctx, const bool retain) {
     try {
         *ctx = getContext()();
-        if (retain) clRetainContext(*ctx);
+        if (retain) { clRetainContext(*ctx); }
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -655,7 +706,7 @@ af_err afcl_get_context(cl_context* ctx, const bool retain) {
 af_err afcl_get_queue(cl_command_queue* queue, const bool retain) {
     try {
         *queue = getQueue()();
-        if (retain) clRetainCommandQueue(*queue);
+        if (retain) { clRetainCommandQueue(*queue); }
     }
     CATCHALL;
     return AF_SUCCESS;

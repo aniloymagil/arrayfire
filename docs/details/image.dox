@@ -34,7 +34,7 @@ and red-difference chroma components.
 \addtogroup  arrayfire_func
 @{
 
-\defgroup image_func_colorspace colorspace
+\defgroup image_func_colorspace colorSpace
 \ingroup colorconv_mat
 
 Colorspace conversion function
@@ -262,7 +262,7 @@ discussion on it can be found [here](http://en.wikipedia.org/wiki/Sobel_operator
 
 =======================================================================
 
-\defgroup image_func_anisotropic_diffusion AnisotropicDiffusion
+\defgroup image_func_anisotropic_diffusion anisotropicDiffusion
 \ingroup imageflt_mat
 
 \brief Anisotropic Smoothing Filter
@@ -753,7 +753,7 @@ Affine transforms can be used for various purposes. \ref af::translate, \ref af:
 are specializations of the transform function.
 
 
-\defgroup transform_func_coordinates transformcoordinates
+\defgroup transform_func_coordinates transformCoordinates
 \ingroup transform_mat
 
 Transform input coordinates
@@ -766,7 +766,7 @@ transformed points.
 
 =======================================================================
 
-\defgroup image_func_sat SAT
+\defgroup image_func_sat sat
 \ingroup imageflt_mat
 
 \brief Summed Area Tables
@@ -970,10 +970,10 @@ wide range of edges in images. A more in depth discussion on it can be found [he
 
 =======================================================================
 
-\defgroup image_func_iterative_deconv Iterative Deconvolutions
+\defgroup image_func_iterative_deconv iterativeDeconv
 \ingroup imageflt_mat
 
-Iterative Deconvolution Algorithms
+\brief Iterative Deconvolution
 
 The following table shows the iteration update equations of the respective
 deconvolution algorithms.
@@ -981,22 +981,16 @@ deconvolution algorithms.
 <table>
 <tr><th>Algorithm</th><th>Update Equation</th></tr>
 <tr>
-  <td>VanCittert</td>
-  <td>
-    \f$ \hat{I}_{n} = \hat{I}_{n-1} + \alpha * (I - P \otimes \hat{I}_{n-1}) \f$
-  </td>
-</tr>
-<tr>
-  <td>Jansson-VanCittert</td>
-  <td>
-    \f$ \hat{I}_{n} = \hat{I}_{n-1} + \alpha * (1 - \frac{2*| \hat{I}_{n-1}-\frac{B}{2} |}{B}) * (I - P \otimes \hat{I}_{n-1}) \f$
-  </td>
-</tr>
-<tr>
     <td>LandWeber</td>
     <td>
         \f$ \hat{I}_{n} = \hat{I}_{n-1} + \alpha * P^T \otimes (I - P \otimes \hat{I}_{n-1}) \f$
     </td>
+</tr>
+<tr>
+  <td>Richardson-Lucy</td>
+  <td>
+    \f$ \hat{I}_{n} = \hat{I}_{n-1} . ( \frac{I}{\hat{I}_{n-1} \otimes P} \otimes P^T ) \f$
+  </td>
 </tr>
 </table>
 
@@ -1022,8 +1016,10 @@ to be in a fixed range, that should be done by the caller explicitly.
 
 =======================================================================
 
-\defgroup image_func_inverse_deconv Inverse Deconvolution
+\defgroup image_func_inverse_deconv inverseDeconv
 \ingroup imageflt_mat
+
+\brief Inverse Deconvolution
 
 Inverse deconvolution is an linear algorithm i.e. they are non-iterative in
 nature and usually faster than iterative deconvolution algorithms.
@@ -1044,20 +1040,6 @@ where
     - \f$ P_{\omega} \f$ is the point spread function in frequency domain
     - \f$ \gamma \f$ is a user defined regularization constant
 
-#### Weiner's Deconvolution Method:
-
-The update equation for this algorithm is as follows:
-
-\f[
-\hat{I}_{\omega} = \frac{ I_{\omega} * P^{*}_{\omega} } { |P_{\omega}|^2 + \frac{\gamma}{|I_{\omega}|^2 - \gamma} }
-\f]
-
-where
-    - \f$ I_{\omega} \f$ is the input/blurred image in frequency domain
-    - \f$ P_{\omega} \f$ is the point spread function in frequency domain
-    - \f$ \gamma \f$ is a user defined noise variance constant
-
-
 Inverse deconvolution function excepts \ref af::array of the following types only:
     - \ref f32
     - \ref s16
@@ -1071,6 +1053,43 @@ values of output to be in a fixed range, that should be done by the caller
 explicitly.
 
 =======================================================================
+
+\defgroup image_func_confidence_cc confidenceCC
+\ingroup connected_comps_mat
+
+\brief Segment image based on similar pixel characteristics
+
+This filter is similar to \ref regions() (connected components) with additional
+criteria for segmentation. In \ref regions(), all connected (\ref af_connectivity)
+pixels connected are considered to be a single component. In this
+variation of connected components, pixels having similar pixel statistics
+of the neighborhoods around a given set of seed points are grouped together.
+
+The parameter \p radius determines the size of neighborhood around a seed point.
+
+Mean (\f$ \mu \f$) and Variance (\f$ \sigma^2 \f$) are the pixel statistics that
+are computed across all neighborhoods around the given set of seed points. The
+pixels which are connected to seed points and lie in the confidence interval
+ (\f$ [\mu - \alpha * \sigma, \mu + \alpha * \sigma] \f$ where \f$ \alpha \f$
+is the parameter \p multiplier) are grouped. \p multiplier can be used to
+control the width of the confidence interval.
+
+This filter follows an iterative approach for fine tuning the segmentation.
+An initial segmenetation followed by a finite number (\p iter) of segmentations
+are performed. The user provided parameter \p iter is only a request and the
+algorithm can prempt the execution if \f$ \sigma^2 \f$ approaches zero. The
+initial segmentation uses the mean and variance calculated from the neighborhoods
+of all the seed points. For subsequent segmentations, all pixels in the previous
+segmentation are used to re-calculate the mean and variance (as opposed to using
+the pixels in the neighborhood of the seed point).
+
+Given below is a sample output for segmenting three different regions of a
+donut using single seed.
+
+<img src="ccc_sample_output.png" align="center" alt="Confidence Connected Components Example"
+width="60%" height="60%"/>
+
+
 
 @}
 */

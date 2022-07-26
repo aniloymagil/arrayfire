@@ -10,6 +10,7 @@
 #include <copy.hpp>
 
 #include <Array.hpp>
+#include <common/half.hpp>
 #include <err_cuda.hpp>
 #include <kernel/pad_array_borders.hpp>
 
@@ -24,6 +25,8 @@ Array<T> padArrayBorders(Array<T> const& in, dim4 const& lowerBoundPadding,
                lowerBoundPadding[1] + iDims[1] + upperBoundPadding[1],
                lowerBoundPadding[2] + iDims[2] + upperBoundPadding[2],
                lowerBoundPadding[3] + iDims[3] + upperBoundPadding[3]);
+
+    if (oDims == iDims) { return in; }
 
     auto ret = createEmptyArray<T>(oDims);
 
@@ -48,4 +51,5 @@ INSTANTIATE_PAD_ARRAY_BORDERS(uchar)
 INSTANTIATE_PAD_ARRAY_BORDERS(char)
 INSTANTIATE_PAD_ARRAY_BORDERS(ushort)
 INSTANTIATE_PAD_ARRAY_BORDERS(short)
+INSTANTIATE_PAD_ARRAY_BORDERS(common::half)
 }  // namespace cuda

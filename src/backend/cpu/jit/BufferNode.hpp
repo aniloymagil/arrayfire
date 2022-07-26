@@ -8,43 +8,65 @@
  ********************************************************/
 
 #pragma once
+
 #include <optypes.hpp>
-#include <mutex>
-#include <vector>
+#include <af/defines.h>
 #include "Node.hpp"
+
+#include <functional>
+#include <memory>
+#include <sstream>
+#include <string>
+
 namespace cpu {
 
 namespace jit {
 
-using std::shared_ptr;
 template<typename T>
 class BufferNode : public TNode<T> {
    protected:
-    shared_ptr<T> m_sptr;
+    std::shared_ptr<T> m_data;
     T *m_ptr;
     unsigned m_bytes;
     dim_t m_strides[4];
     dim_t m_dims[4];
-    std::once_flag m_set_data_flag;
     bool m_linear_buffer;
 
    public:
-    BufferNode() : TNode<T>(T(0), 0, {}) {}
+    BufferNode()
+        : TNode<T>(T(0), 0, {})
+        , m_bytes(0)
+        , m_strides{0, 0, 0, 0}
+        , m_dims{0, 0, 0, 0}
+        , m_linear_buffer(true) {}
 
-    void setData(shared_ptr<T> data, unsigned bytes, dim_t data_off,
+    std::unique_ptr<common::Node> clone() final {
+        return std::make_unique<BufferNode>(*this);
+    }
+
+    void setData(std::shared_ptr<T> data, unsigned bytes, dim_t data_off,
                  const dim_t *dims, const dim_t *strides,
                  const bool is_linear) {
-        std::call_once(m_set_data_flag, [this, data, bytes, data_off, dims,
-                                         strides, is_linear]() {
-            m_sptr          = data;
-            m_ptr           = data.get() + data_off;
-            m_bytes         = bytes;
-            m_linear_buffer = is_linear;
-            for (int i = 0; i < 4; i++) {
-                m_strides[i] = strides[i];
-                m_dims[i]    = dims[i];
-            }
-        });
+        m_data          = data;
+        m_ptr           = data.get() + data_off;
+        m_bytes         = bytes;
+        m_linear_buffer = is_linear;
+        for (int i = 0; i < 4; i++) {
+            m_strides[i] = strides[i];
+            m_dims[i]    = dims[i];
+        }
+    }
+
+    void setShape(af::dim4 new_shape) final {
+        auto new_strides = calcStrides(new_shape);
+        m_dims[0]        = new_shape[0];
+        m_dims[1]        = new_shape[1];
+        m_dims[2]        = new_shape[2];
+        m_dims[3]        = new_shape[3];
+        m_strides[0]     = new_strides[0];
+        m_strides[1]     = new_strides[1];
+        m_strides[2]     = new_strides[2];
+        m_strides[3]     = new_strides[3];
     }
 
     void calc(int x, int y, int z, int w, int lim) final {
@@ -57,7 +79,8 @@ class BufferNode : public TNode<T> {
         T *in_ptr   = m_ptr + l_off;
         Tc *out_ptr = this->m_val.data();
         for (int i = 0; i < lim; i++) {
-            out_ptr[i] = static_cast<Tc>(in_ptr[((x + i) < m_dims[0]) ? (x + i) : 0]);
+            out_ptr[i] =
+                static_cast<Tc>(in_ptr[((x + i) < m_dims[0]) ? (x + i) : 0]);
         }
     }
 
@@ -81,6 +104,40 @@ class BufferNode : public TNode<T> {
 
     size_t getBytes() const final { return m_bytes; }
 
+    void genKerName(std::string &kerString,
+                    const common::Node_ids &ids) const final {
+        UNUSED(kerString);
+        UNUSED(ids);
+    }
+
+    void genParams(std::stringstream &kerStream, int id,
+                   bool is_linear) const final {
+        UNUSED(kerStream);
+        UNUSED(id);
+        UNUSED(is_linear);
+    }
+
+    int setArgs(int start_id, bool is_linear,
+                std::function<void(int id, const void *ptr, size_t arg_size)>
+                    setArg) const override {
+        UNUSED(is_linear);
+        UNUSED(setArg);
+        return start_id++;
+    }
+
+    void genOffsets(std::stringstream &kerStream, int id,
+                    bool is_linear) const final {
+        UNUSED(kerStream);
+        UNUSED(id);
+        UNUSED(is_linear);
+    }
+
+    void genFuncs(std::stringstream &kerStream,
+                  const common::Node_ids &ids) const final {
+        UNUSED(kerStream);
+        UNUSED(ids);
+    }
+
     bool isLinear(const dim_t *dims) const final {
         return m_linear_buffer && dims[0] == m_dims[0] &&
                dims[1] == m_dims[1] && dims[2] == m_dims[2] &&
@@ -88,6 +145,36 @@ class BufferNode : public TNode<T> {
     }
 
     bool isBuffer() const final { return true; }
+
+    size_t getHash() const noexcept final {
+        std::hash<const void *> ptr_hash;
+        std::hash<af::dtype> aftype_hash;
+        return ptr_hash(static_cast<const void *>(m_ptr)) ^
+               (aftype_hash(
+                    static_cast<af::dtype>(af::dtype_traits<T>::af_type))
+                << 1);
+    }
+
+    /// Compares two BufferNodeBase objects for equality
+    bool operator==(const BufferNode<T> &other) const noexcept {
+        using std::begin;
+        using std::end;
+        using std::equal;
+        return m_ptr == other.m_ptr && m_bytes == other.m_bytes &&
+               m_linear_buffer == other.m_linear_buffer &&
+               equal(begin(m_dims), end(m_dims), begin(other.m_dims)) &&
+               equal(begin(m_strides), end(m_strides), begin(other.m_strides));
+    };
+
+    /// Overloads the equality operator to call comparisons between Buffer
+    /// objects. Calls the BufferNodeBase equality operator if the other
+    /// object is also a Buffer Node
+    bool operator==(const common::Node &other) const noexcept final {
+        if (other.isBuffer() && this->getType() == other.getType()) {
+            return *this == static_cast<const BufferNode<T> &>(other);
+        }
+        return false;
+    }
 };
 
 }  // namespace jit

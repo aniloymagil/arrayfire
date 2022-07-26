@@ -9,18 +9,21 @@
 
 #include <common/defines.hpp>
 #include <common/jit/Node.hpp>
+#include <common/util.hpp>
 
+#include <sstream>
 #include <string>
 #include <vector>
-using namespace std;
+
+using std::vector;
 
 namespace common {
 
-int Node::getNodesMap(Node_map_t &node_map, vector<const Node *> &full_nodes,
-                      vector<Node_ids> &full_ids) const {
+int Node::getNodesMap(Node_map_t &node_map, vector<Node *> &full_nodes,
+                      vector<Node_ids> &full_ids) {
     auto iter = node_map.find(this);
     if (iter == node_map.end()) {
-        Node_ids ids;
+        Node_ids ids{};
 
         for (int i = 0; i < kMaxChildren && m_children[i] != nullptr; i++) {
             ids.child_ids[i] =
@@ -35,4 +38,40 @@ int Node::getNodesMap(Node_map_t &node_map, vector<const Node *> &full_nodes,
     return iter->second;
 }
 
+std::string getFuncName(const vector<Node *> &output_nodes,
+                        const vector<Node *> &full_nodes,
+                        const vector<Node_ids> &full_ids, bool is_linear) {
+    std::string funcName;
+    funcName.reserve(512);
+    funcName = (is_linear ? 'L' : 'G');
+
+    for (const auto &node : output_nodes) {
+        funcName += '_';
+        funcName += node->getNameStr();
+    }
+
+    for (int i = 0; i < static_cast<int>(full_nodes.size()); i++) {
+        full_nodes[i]->genKerName(funcName, full_ids[i]);
+    }
+
+    return "KER" + std::to_string(deterministicHash(funcName));
+}
+
+bool NodePtr_equalto::operator()(const Node *l, const Node *r) const noexcept {
+    return *l == *r;
+}
+
+auto isBuffer(const Node &ptr) -> bool { return ptr.isBuffer(); }
+
+auto isScalar(const Node &ptr) -> bool { return ptr.isScalar(); }
+
+/// Returns true if the buffer is linear
+bool Node::isLinear(const dim_t dims[4]) const { return true; }
+
 }  // namespace common
+
+size_t std::hash<common::Node *>::operator()(
+    common::Node *const node) const noexcept {
+    common::Node *const node_ptr = static_cast<common::Node *const>(node);
+    return node_ptr->getHash();
+}

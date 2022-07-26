@@ -310,10 +310,22 @@ void testRandomEngineUniform(randomEngineType type) {
     int elem = 16 * 1024 * 1024;
     randomEngine r(type, 0);
     array A = randu(elem, ty, r);
-    T m     = mean<T>(A);
-    T s     = stdev<T>(A);
-    ASSERT_NEAR(m, 0.5, 1e-3);
-    ASSERT_NEAR(s, 0.2887, 1e-2);
+
+    // If double precision is available then perform the mean calculation using
+    // double because the A array is large and causes accuracy issues when using
+    // certain compiler flags (i.e. --march=native)
+    if (af::isDoubleAvailable(af::getDevice())) {
+        array Ad = A.as(f64);
+        double m = mean<double>(Ad);
+        double s = stdev<double>(Ad, AF_VARIANCE_POPULATION);
+        ASSERT_NEAR(m, 0.5, 1e-3);
+        ASSERT_NEAR(s, 0.2887, 1e-2);
+    } else {
+        T m = mean<T>(A);
+        T s = stdev<T>(A, AF_VARIANCE_POPULATION);
+        ASSERT_NEAR(m, 0.5, 1e-3);
+        ASSERT_NEAR(s, 0.2887, 1e-2);
+    }
 }
 
 template<typename T>
@@ -325,7 +337,7 @@ void testRandomEngineNormal(randomEngineType type) {
     randomEngine r(type, 0);
     array A = randn(elem, ty, r);
     T m     = mean<T>(A);
-    T s     = stdev<T>(A);
+    T s     = stdev<T>(A, AF_VARIANCE_POPULATION);
     ASSERT_NEAR(m, 0, 1e-1);
     ASSERT_NEAR(s, 1, 1e-1);
 }
@@ -399,93 +411,4 @@ TYPED_TEST(RandomEngineSeed, threefrySeedUniform) {
 
 TYPED_TEST(RandomEngineSeed, mersenneSeedUniform) {
     testRandomEngineSeed<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
-}
-
-template<typename T>
-void testRandomEnginePeriod(randomEngineType type) {
-    SUPPORTED_TYPE_CHECK(T);
-    dtype ty = (dtype)dtype_traits<T>::af_type;
-
-    int elem  = 1024 * 1024;
-    int steps = 4 * 1024;
-    randomEngine r(type, 0);
-
-    array first = randu(elem, ty, r);
-
-    for (int i = 0; i < steps; ++i) {
-        array step     = randu(elem, ty, r);
-        bool different = !allTrue<bool>(first == step);
-        ASSERT_TRUE(different);
-    }
-}
-
-TYPED_TEST(RandomEngine, DISABLED_philoxRandomEnginePeriod) {
-    testRandomEnginePeriod<TypeParam>(AF_RANDOM_ENGINE_PHILOX_4X32_10);
-}
-
-TYPED_TEST(RandomEngine, DISABLED_threefryRandomEnginePeriod) {
-    testRandomEnginePeriod<TypeParam>(AF_RANDOM_ENGINE_THREEFRY_2X32_16);
-}
-
-TYPED_TEST(RandomEngine, DISABLED_mersenneRandomEnginePeriod) {
-    testRandomEnginePeriod<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
-}
-
-template<typename T>
-T chi2_statistic(array input, array expected) {
-    expected *= sum<T>(input) / sum<T>(expected);
-    array diff = input - expected;
-    return sum<T>((diff * diff) / expected);
-}
-
-template<typename T>
-void testRandomEngineUniformChi2(randomEngineType type) {
-    SUPPORTED_TYPE_CHECK(T);
-    dtype ty = (dtype)dtype_traits<T>::af_type;
-
-    int elem  = 256 * 1024 * 1024;
-    int steps = 32;
-    int bins  = 100;
-
-    array total_hist = constant(0.0, bins, ty);
-    array expected   = constant(1.0 / bins, bins, ty);
-
-    randomEngine r(type, 0);
-
-    // R> qchisq(c(5e-6, 1 - 5e-6), 99)
-    // [1]  48.68125 173.87456
-    T lower = 48.68125;
-    T upper = 173.87456;
-
-    bool prev_step  = true;
-    bool prev_total = true;
-    for (int i = 0; i < steps; ++i) {
-        array step_hist = histogram(randu(elem, ty, r), bins, 0.0, 1.0);
-        T step_chi2     = chi2_statistic<T>(step_hist, expected);
-        if (!prev_step) {
-            EXPECT_GT(step_chi2, lower) << "at step: " << i;
-            EXPECT_LT(step_chi2, upper) << "at step: " << i;
-        }
-        prev_step = step_chi2 > lower && step_chi2 < upper;
-
-        total_hist += step_hist;
-        T total_chi2 = chi2_statistic<T>(total_hist, expected);
-        if (!prev_total) {
-            EXPECT_GT(total_chi2, lower) << "at step: " << i;
-            EXPECT_LT(total_chi2, upper) << "at step: " << i;
-        }
-        prev_total = total_chi2 > lower && total_chi2 < upper;
-    }
-}
-
-TYPED_TEST(RandomEngine, DISABLED_philoxRandomEngineUniformChi2) {
-    testRandomEngineUniformChi2<TypeParam>(AF_RANDOM_ENGINE_PHILOX_4X32_10);
-}
-
-TYPED_TEST(RandomEngine, DISABLED_threefryRandomEngineUniformChi2) {
-    testRandomEngineUniformChi2<TypeParam>(AF_RANDOM_ENGINE_THREEFRY_2X32_16);
-}
-
-TYPED_TEST(RandomEngine, DISABLED_mersenneRandomEngineUniformChi2) {
-    testRandomEngineUniformChi2<TypeParam>(AF_RANDOM_ENGINE_MERSENNE_GP11213);
 }

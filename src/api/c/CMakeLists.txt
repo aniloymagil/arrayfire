@@ -23,6 +23,7 @@ target_sources(c_api_interface
   ${ArrayFire_SOURCE_DIR}/include/af/defines.h
   ${ArrayFire_SOURCE_DIR}/include/af/device.h
   ${ArrayFire_SOURCE_DIR}/include/af/dim4.hpp
+  ${ArrayFire_SOURCE_DIR}/include/af/event.h
   ${ArrayFire_SOURCE_DIR}/include/af/exception.h
   ${ArrayFire_SOURCE_DIR}/include/af/features.h
   ${ArrayFire_SOURCE_DIR}/include/af/gfor.h
@@ -33,6 +34,7 @@ target_sources(c_api_interface
   ${ArrayFire_SOURCE_DIR}/include/af/lapack.h
   ${ArrayFire_SOURCE_DIR}/include/af/macros.h
   ${ArrayFire_SOURCE_DIR}/include/af/ml.h
+  ${ArrayFire_SOURCE_DIR}/include/af/memory.h
   ${ArrayFire_SOURCE_DIR}/include/af/opencl.h
   ${ArrayFire_SOURCE_DIR}/include/af/random.h
   ${ArrayFire_SOURCE_DIR}/include/af/seq.h
@@ -61,6 +63,7 @@ target_sources(c_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/clamp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/colorspace.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/complex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/confidence_connected.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolve.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/corrcoef.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/covariance.cpp
@@ -70,6 +73,8 @@ target_sources(c_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/diff.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/events.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/error.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exampleFunction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fast.cpp
@@ -96,9 +101,12 @@ target_sources(c_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/imageio2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/implicit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/implicit.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgproc_common.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/internal.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inverse.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jit_test_api.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/jit_test_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/join.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/match_template.cpp
@@ -106,12 +114,12 @@ target_sources(c_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/meanshift.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/median.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/memoryapi.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/moddims.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/moments.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/morph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/nearest_neighbour.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/norm.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ops.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/optypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/orb.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pinverse.cpp
@@ -174,6 +182,23 @@ if(FreeImage_FOUND AND AF_WITH_IMAGEIO)
         COMPONENT common_backend_dependencies)
     endif ()
   endif ()
+endif()
+
+if(BUILD_WITH_MKL)
+  target_compile_definitions(c_api_interface
+    INTERFACE
+      AF_MKL_INTERFACE_SIZE=${MKL_INTERFACE_INTEGER_SIZE}
+    )
+  # Create mkl thread layer compile option based on cmake cache variable
+  if(MKL_THREAD_LAYER STREQUAL "Sequential")
+    target_compile_definitions(c_api_interface INTERFACE AF_MKL_THREAD_LAYER=0)
+  elseif(MKL_THREAD_LAYER STREQUAL "GNU OpenMP")
+    target_compile_definitions(c_api_interface INTERFACE AF_MKL_THREAD_LAYER=1)
+  elseif(MKL_THREAD_LAYER STREQUAL "Intel OpenMP")
+    target_compile_definitions(c_api_interface INTERFACE AF_MKL_THREAD_LAYER=2)
+  else() #default Intel Thread Layer for ArrayFire
+    target_compile_definitions(c_api_interface INTERFACE AF_MKL_THREAD_LAYER=3)
+  endif()
 endif()
 
 target_include_directories(c_api_interface

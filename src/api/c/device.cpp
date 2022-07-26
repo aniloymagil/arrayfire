@@ -11,23 +11,49 @@
 #include <backend.hpp>
 #include <common/err_common.hpp>
 #include <common/half.hpp>
+#include <common/util.hpp>
 #include <handle.hpp>
 #include <platform.hpp>
 #include <sparse_handle.hpp>
-
 #include <af/backend.h>
 #include <af/device.h>
 #include <af/dim4.hpp>
 #include <af/version.h>
 
-#include <cstring>
+#if defined(USE_MKL)
+#include <mkl_service.h>
+#endif
 
-using namespace detail;
+#include <cstring>
+#include <string>
+
+using af::dim4;
 using common::half;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::devprop;
+using detail::evalFlag;
+using detail::getActiveDeviceId;
+using detail::getBackend;
+using detail::getDeviceCount;
+using detail::getDeviceInfo;
+using detail::init;
+using detail::intl;
+using detail::isDoubleSupported;
+using detail::isHalfSupported;
+using detail::setDevice;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 af_err af_set_backend(const af_backend bknd) {
     try {
-        ARG_ASSERT(0, bknd == getBackend());
+        if (bknd != getBackend() && bknd != AF_BACKEND_DEFAULT) {
+            return AF_ERR_ARG;
+        }
     }
     CATCHALL;
 
@@ -49,9 +75,12 @@ af_err af_get_available_backends(int* result) {
 
 af_err af_get_backend_id(af_backend* result, const af_array in) {
     try {
-        ARG_ASSERT(1, in != 0);
-        const ArrayInfo& info = getInfo(in, false, false);
-        *result               = info.getBackendId();
+        if (in) {
+            const ArrayInfo& info = getInfo(in, false, false);
+            *result               = info.getBackendId();
+        } else {
+            return AF_ERR_ARG;
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -59,23 +88,65 @@ af_err af_get_backend_id(af_backend* result, const af_array in) {
 
 af_err af_get_device_id(int* device, const af_array in) {
     try {
-        ARG_ASSERT(1, in != 0);
-        const ArrayInfo& info = getInfo(in, false, false);
-        *device               = info.getDevId();
+        if (in) {
+            const ArrayInfo& info = getInfo(in, false, false);
+            *device               = static_cast<int>(info.getDevId());
+        } else {
+            return AF_ERR_ARG;
+        }
     }
     CATCHALL;
     return AF_SUCCESS;
 }
 
 af_err af_get_active_backend(af_backend* result) {
-    *result = (af_backend)getBackend();
+    *result = static_cast<af_backend>(getBackend());
     return AF_SUCCESS;
 }
 
 af_err af_init() {
     try {
         thread_local std::once_flag flag;
-        std::call_once(flag, []() { getDeviceInfo(); });
+        std::call_once(flag, []() {
+            init();
+#if defined(USE_MKL) && !defined(USE_STATIC_MKL)
+            int errCode = -1;
+            // Have used the AF_MKL_INTERFACE_SIZE as regular if's so that
+            // we will know if these are not defined when using MKL when a
+            // compilation error is generated.
+            if (AF_MKL_INTERFACE_SIZE == 4) {
+                errCode = mkl_set_interface_layer(MKL_INTERFACE_LP64);
+            } else if (AF_MKL_INTERFACE_SIZE == 8) {
+                errCode = mkl_set_interface_layer(MKL_INTERFACE_ILP64);
+            }
+            if (errCode == -1) {
+                AF_ERROR(
+                    "Intel MKL Interface layer was not specified prior to the "
+                    "call and the input parameter is incorrect.",
+                    AF_ERR_RUNTIME);
+            }
+            switch (AF_MKL_THREAD_LAYER) {
+                case 0:
+                    errCode = mkl_set_threading_layer(MKL_THREADING_SEQUENTIAL);
+                    break;
+                case 1:
+                    errCode = mkl_set_threading_layer(MKL_THREADING_GNU);
+                    break;
+                case 2:
+                    errCode = mkl_set_threading_layer(MKL_THREADING_INTEL);
+                    break;
+                case 3:
+                    errCode = mkl_set_threading_layer(MKL_THREADING_TBB);
+                    break;
+            }
+            if (errCode == -1) {
+                AF_ERROR(
+                    "Intel MKL Thread layer was not specified prior to the "
+                    "call and the input parameter is incorrect.",
+                    AF_ERR_RUNTIME);
+            }
+#endif
+        });
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -83,7 +154,7 @@ af_err af_init() {
 
 af_err af_info() {
     try {
-        printf("%s", getDeviceInfo().c_str());
+        printf("%s", getDeviceInfo().c_str());  // NOLINT
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -93,7 +164,8 @@ af_err af_info_string(char** str, const bool verbose) {
     UNUSED(verbose);  // TODO(umar): Add something useful
     try {
         std::string infoStr = getDeviceInfo();
-        af_alloc_host((void**)str, sizeof(char) * (infoStr.size() + 1));
+        af_alloc_host(reinterpret_cast<void**>(str),
+                      sizeof(char) * (infoStr.size() + 1));
 
         // Need to do a deep copy
         // str.c_str wont cut it
@@ -141,7 +213,7 @@ af_err af_get_device_count(int* nDevices) {
 
 af_err af_get_device(int* device) {
     try {
-        *device = getActiveDeviceId();
+        *device = static_cast<int>(getActiveDeviceId());
     }
     CATCHALL;
     return AF_SUCCESS;
@@ -150,7 +222,23 @@ af_err af_get_device(int* device) {
 af_err af_set_device(const int device) {
     try {
         ARG_ASSERT(0, device >= 0);
-        ARG_ASSERT(0, setDevice(device) >= 0);
+        if (setDevice(device) < 0) {
+            int ndevices = getDeviceCount();
+            if (ndevices == 0) {
+                AF_ERROR(
+                    "No devices were found on this system. Ensure "
+                    "you have installed the device driver as well as the "
+                    "necessary runtime libraries for your platform.",
+                    AF_ERR_RUNTIME);
+            } else {
+                char buf[512];
+                char err_msg[] =
+                    "The device index of %d is out of range. Use a value "
+                    "between 0 and %d.";
+                snprintf(buf, 512, err_msg, device, ndevices - 1);  // NOLINT
+                AF_ERROR(buf, AF_ERR_ARG);
+            }
+        }
     }
     CATCHALL;
 
@@ -159,7 +247,7 @@ af_err af_set_device(const int device) {
 
 af_err af_sync(const int device) {
     try {
-        int dev = device == -1 ? getActiveDeviceId() : device;
+        int dev = device == -1 ? static_cast<int>(getActiveDeviceId()) : device;
         detail::sync(dev);
     }
     CATCHALL;
@@ -169,13 +257,11 @@ af_err af_sync(const int device) {
 template<typename T>
 static inline void eval(af_array arr) {
     getArray<T>(arr).eval();
-    return;
 }
 
 template<typename T>
 static inline void sparseEval(af_array arr) {
     getSparseArray<T>(arr).eval();
-    return;
 }
 
 af_err af_eval(af_array arr) {
@@ -225,14 +311,13 @@ static inline void evalMultiple(int num, af_array* arrayPtrs) {
     }
 
     evalMultiple<T>(arrays);
-    return;
 }
 
 af_err af_eval_multiple(int num, af_array* arrays) {
     try {
         const ArrayInfo& info = getInfo(arrays[0]);
         af_dtype type         = info.getType();
-        dim4 dims             = info.dims();
+        const dim4& dims      = info.dims();
 
         for (int i = 1; i < num; i++) {
             const ArrayInfo& currInfo = getInfo(arrays[i]);
@@ -284,5 +369,41 @@ af_err af_get_manual_eval_flag(bool* flag) {
         *flag            = !backendFlag;
     }
     CATCHALL;
+    return AF_SUCCESS;
+}
+
+af_err af_get_kernel_cache_directory(size_t* length, char* path) {
+    try {
+        std::string& cache_path = getCacheDirectory();
+        if (path == nullptr) {
+            ARG_ASSERT(length != nullptr, 1);
+            *length = cache_path.size();
+        } else {
+            size_t min_len = cache_path.size();
+            if (length) {
+                if (*length < cache_path.size()) {
+                    AF_ERROR("Length not sufficient to store the path",
+                             AF_ERR_SIZE);
+                }
+                min_len = std::min(*length, cache_path.size());
+            }
+            memcpy(path, cache_path.c_str(), min_len);
+        }
+    }
+    CATCHALL
+    return AF_SUCCESS;
+}
+
+af_err af_set_kernel_cache_directory(const char* path, int override_env) {
+    try {
+        ARG_ASSERT(path != nullptr, 1);
+        if (override_env) {
+            getCacheDirectory() = std::string(path);
+        } else {
+            auto env_path = getEnvVar(JIT_KERNEL_CACHE_DIRECTORY_ENV_NAME);
+            if (env_path.empty()) { getCacheDirectory() = std::string(path); }
+        }
+    }
+    CATCHALL
     return AF_SUCCESS;
 }

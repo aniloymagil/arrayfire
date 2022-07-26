@@ -39,7 +39,7 @@ class ArrayInfo {
     // This can be changed in the future if the need arises for more devices as
     // this implementation is internal. Make sure to change the bit shift ops
     // when such a change is being made
-    int devId;
+    unsigned devId;
     af_dtype type;
     af::dim4 dim_size;
     dim_t offset;
@@ -47,7 +47,7 @@ class ArrayInfo {
     bool is_sparse;
 
    public:
-    ArrayInfo(int id, af::dim4 size, dim_t offset_, af::dim4 stride,
+    ArrayInfo(unsigned id, af::dim4 size, dim_t offset_, af::dim4 stride,
               af_dtype af_type)
         : devId(id)
         , type(af_type)
@@ -56,6 +56,10 @@ class ArrayInfo {
         , dim_strides(stride)
         , is_sparse(false) {
         setId(id);
+        static_assert(std::is_move_assignable<ArrayInfo>::value,
+                      "ArrayInfo is not move assignable");
+        static_assert(std::is_move_constructible<ArrayInfo>::value,
+                      "ArrayInfo is not move constructible");
         static_assert(
             offsetof(ArrayInfo, devId) == 0,
             "ArrayInfo::devId must be the first member variable of ArrayInfo. \
@@ -63,7 +67,7 @@ class ArrayInfo {
                    This is then used in the unified backend to check mismatched arrays.");
     }
 
-    ArrayInfo(int id, af::dim4 size, dim_t offset_, af::dim4 stride,
+    ArrayInfo(unsigned id, af::dim4 size, dim_t offset_, af::dim4 stride,
               af_dtype af_type, bool sparse)
         : devId(id)
         , type(af_type)
@@ -77,12 +81,30 @@ class ArrayInfo {
             "ArrayInfo::devId must be the first member variable of ArrayInfo. \
                    devId is used to encode the backend into the integer. \
                    This is then used in the unified backend to check mismatched arrays.");
+        static_assert(std::is_nothrow_move_assignable<ArrayInfo>::value,
+                      "ArrayInfo is not nothrow move assignable");
+        static_assert(std::is_nothrow_move_constructible<ArrayInfo>::value,
+                      "ArrayInfo is not nothrow move constructible");
     }
 
-    // Copy constructors are deprecated if there is a
-    // user-defined destructor in c++11
     ArrayInfo()                       = default;
     ArrayInfo(const ArrayInfo& other) = default;
+    ArrayInfo(ArrayInfo&& other)      = default;
+
+    ArrayInfo& operator=(ArrayInfo other) noexcept {
+        swap(other);
+        return *this;
+    }
+
+    void swap(ArrayInfo& other) noexcept {
+        using std::swap;
+        swap(devId, other.devId);
+        swap(type, other.type);
+        swap(dim_size, other.dim_size);
+        swap(offset, other.offset);
+        swap(dim_strides, other.dim_strides);
+        swap(is_sparse, other.is_sparse);
+    }
 
     const af_dtype& getType() const { return type; }
 
@@ -90,12 +112,12 @@ class ArrayInfo {
 
     const af::dim4& strides() const { return dim_strides; }
 
-    size_t elements() const { return dim_size.elements(); }
-    size_t ndims() const { return dim_size.ndims(); }
+    dim_t elements() const { return dim_size.elements(); }
+    dim_t ndims() const { return dim_size.ndims(); }
     const af::dim4& dims() const { return dim_size; }
     size_t total() const { return offset + dim_strides[3] * dim_size[3]; }
 
-    int getDevId() const;
+    unsigned getDevId() const;
 
     void setId(int id) const;
 

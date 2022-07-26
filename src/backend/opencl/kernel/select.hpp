@@ -8,56 +8,39 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
-#include <cache.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_opencl.hpp>
 #include <kernel_headers/select.hpp>
 #include <math.hpp>
-#include <program.hpp>
 #include <traits.hpp>
-#include <types.hpp>
-#include <string>
 
-using cl::Buffer;
-using cl::EnqueueArgs;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::NDRange;
-using cl::Program;
-using std::string;
+#include <string>
+#include <vector>
 
 namespace opencl {
 namespace kernel {
-static const uint DIMX  = 32;
-static const uint DIMY  = 8;
-static const int REPEAT = 64;
+constexpr uint DIMX  = 32;
+constexpr uint DIMY  = 8;
+constexpr int REPEAT = 64;
 
-template<typename T, bool is_same>
-void select_launcher(Param out, Param cond, Param a, Param b, int ndims) {
-    std::string refName = std::string("select_kernel_") +
-                          std::string(dtype_traits<T>::getName()) +
-                          std::to_string(is_same);
+template<typename T>
+void selectLauncher(Param out, Param cond, Param a, Param b, const int ndims,
+                    const bool is_same) {
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(is_same),
+    };
+    std::vector<std::string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(is_same),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
-
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::ostringstream options;
-        options << " -D is_same=" << is_same
-                << " -D T=" << dtype_traits<T>::getName();
-        if (std::is_same<T, double>::value || std::is_same<T, cdouble>::value)
-            options << " -D USE_DOUBLE";
-
-        const char* ker_strs[] = {select_cl};
-        const int ker_lens[]   = {select_cl_len};
-        Program prog;
-        buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "select_kernel");
-
-        addKernelToCache(device, refName, entry);
-    }
+    auto selectOp =
+        common::getKernel("select_kernel", {select_cl_src}, targs, options);
 
     int threads[] = {DIMX, DIMY};
 
@@ -66,18 +49,15 @@ void select_launcher(Param out, Param cond, Param a, Param b, int ndims) {
         threads[1] = 1;
     }
 
-    NDRange local(threads[0], threads[1]);
+    cl::NDRange local(threads[0], threads[1]);
 
     int groups_0 = divup(out.info.dims[0], REPEAT * local[0]);
     int groups_1 = divup(out.info.dims[1], local[1]);
 
-    NDRange global(groups_0 * out.info.dims[2] * local[0],
-                   groups_1 * out.info.dims[3] * local[1]);
+    cl::NDRange global(groups_0 * out.info.dims[2] * local[0],
+                       groups_1 * out.info.dims[3] * local[1]);
 
-    auto selectOp = KernelFunctor<Buffer, KParam, Buffer, KParam, Buffer,
-                                  KParam, Buffer, KParam, int, int>(*entry.ker);
-
-    selectOp(EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+    selectOp(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
              *cond.data, cond.info, *a.data, a.info, *b.data, b.info, groups_0,
              groups_1);
 }
@@ -88,39 +68,24 @@ void select(Param out, Param cond, Param a, Param b, int ndims) {
     for (int i = 0; i < 4; i++) {
         is_same &= (a.info.dims[i] == b.info.dims[i]);
     }
-
-    if (is_same) {
-        select_launcher<T, true>(out, cond, a, b, ndims);
-    } else {
-        select_launcher<T, false>(out, cond, a, b, ndims);
-    }
+    selectLauncher<T>(out, cond, a, b, ndims, is_same);
 }
 
-template<typename T, bool flip>
-void select_scalar(Param out, Param cond, Param a, const double b, int ndims) {
-    std::string refName = std::string("select_scalar_kernel_") +
-                          std::string(dtype_traits<T>::getName()) +
-                          std::to_string(flip);
+template<typename T>
+void select_scalar(Param out, Param cond, Param a, const T b, const int ndims,
+                   const bool flip) {
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<T>(),
+        TemplateArg(flip),
+    };
+    std::vector<std::string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineValue(flip),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
-
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::ostringstream options;
-        options << " -D flip=" << flip
-                << " -D T=" << dtype_traits<T>::getName();
-        if (std::is_same<T, double>::value || std::is_same<T, cdouble>::value)
-            options << " -D USE_DOUBLE";
-
-        const char* ker_strs[] = {select_cl};
-        const int ker_lens[]   = {select_cl_len};
-        Program prog;
-        buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "select_scalar_kernel");
-
-        addKernelToCache(device, refName, entry);
-    }
+    auto selectOp = common::getKernel("select_scalar_kernel", {select_cl_src},
+                                      targs, options);
 
     int threads[] = {DIMX, DIMY};
 
@@ -129,20 +94,16 @@ void select_scalar(Param out, Param cond, Param a, const double b, int ndims) {
         threads[1] = 1;
     }
 
-    NDRange local(threads[0], threads[1]);
+    cl::NDRange local(threads[0], threads[1]);
 
     int groups_0 = divup(out.info.dims[0], REPEAT * local[0]);
     int groups_1 = divup(out.info.dims[1], local[1]);
 
-    NDRange global(groups_0 * out.info.dims[2] * local[0],
-                   groups_1 * out.info.dims[3] * local[1]);
+    cl::NDRange global(groups_0 * out.info.dims[2] * local[0],
+                       groups_1 * out.info.dims[3] * local[1]);
 
-    auto selectOp = KernelFunctor<Buffer, KParam, Buffer, KParam, Buffer,
-                                  KParam, T, int, int>(*entry.ker);
-
-    selectOp(EnqueueArgs(getQueue(), global, local), *out.data, out.info,
-             *cond.data, cond.info, *a.data, a.info, scalar<T>(b), groups_0,
-             groups_1);
+    selectOp(cl::EnqueueArgs(getQueue(), global, local), *out.data, out.info,
+             *cond.data, cond.info, *a.data, a.info, b, groups_0, groups_1);
 }
 }  // namespace kernel
 }  // namespace opencl

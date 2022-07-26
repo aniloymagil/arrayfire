@@ -175,7 +175,7 @@ AFAPI array fft3Norm(const array& in, const double norm_factor, const dim_t odim
 
    \ingroup signal_func_fft
  */
-AFAPI void fftInPlace(array& in, const double norm_factor = 1);
+AFAPI void fftInPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -184,13 +184,12 @@ AFAPI void fftInPlace(array& in, const double norm_factor = 1);
 
    \param[inout]  in is the input array on entry and the output of 2D forward fourier transform on exit
    \param[in]  norm_factor is the normalization factor with which the input is scaled after the transformation is applied
-   \return     the transformed array
 
    \note The input \p in must be complex
 
    \ingroup signal_func_fft2
  */
-AFAPI void fft2InPlace(array& in, const double norm_factor = 1);
+AFAPI void fft2InPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -199,13 +198,12 @@ AFAPI void fft2InPlace(array& in, const double norm_factor = 1);
 
    \param[inout]  in is the input array on entry and the output of 3D forward fourier transform on exit
    \param[in]  norm_factor is the normalization factor with which the input is scaled after the transformation is applied
-   \return     the transformed array
 
    \note The input \p in must be complex
 
    \ingroup signal_func_fft3
  */
-AFAPI void fft3InPlace(array& in, const double norm_factor = 1);
+AFAPI void fft3InPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 /**
@@ -342,7 +340,7 @@ AFAPI array ifft3Norm(const array& in, const double norm_factor, const dim_t odi
 
    \ingroup signal_func_ifft
  */
-AFAPI void ifftInPlace(array& in, const double norm_factor = 1);
+AFAPI void ifftInPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -351,13 +349,12 @@ AFAPI void ifftInPlace(array& in, const double norm_factor = 1);
 
    \param[inout]  in is the input array on entry and the output of 2D inverse fourier transform on exit
    \param[in]  norm_factor is the normalization factor with which the input is scaled after the transformation is applied
-   \return     the transformed array
 
    \note The input \p in must be complex
 
    \ingroup signal_func_ifft2
  */
-AFAPI void ifft2InPlace(array& in, const double norm_factor = 1);
+AFAPI void ifft2InPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -366,13 +363,12 @@ AFAPI void ifft2InPlace(array& in, const double norm_factor = 1);
 
    \param[inout]  in is the input array on entry and the output of 3D inverse fourier transform on exit
    \param[in]  norm_factor is the normalization factor with which the input is scaled after the transformation is applied
-   \return     the transformed array
 
    \note The input \p in must be complex
 
    \ingroup signal_func_ifft3
  */
-AFAPI void ifft3InPlace(array& in, const double norm_factor = 1);
+AFAPI void ifft3InPlace(array& in, const double norm_factor = 1.0);
 #endif
 
 /**
@@ -475,7 +471,7 @@ AFAPI array idft(const array& in);
 template<int rank>
 array fftR2C(const array &in,
              const dim4& dims,
-             const double norm_factor = 0);
+             const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -492,7 +488,7 @@ array fftR2C(const array &in,
 */
 template<int rank>
 array fftR2C(const array &in,
-             const double norm_factor = 0);
+             const double norm_factor = 1.0);
 #endif
 
 #if AF_API_VERSION >= 31
@@ -510,7 +506,7 @@ array fftR2C(const array &in,
 
 template<int rank>
 array fftC2R(const array &in, bool is_odd = false,
-                 const double norm_factor = 0);
+                 const double norm_factor = 1.0);
 #endif
 
 /**
@@ -611,6 +607,9 @@ AFAPI array convolve2(const array& signal, const array& filter, const convMode m
    \param[in]  padding  specifies the padding along each dimension
    \param[in]  dilation specifies the amount to dilate the filter before convolution
    \return              the convolved array
+
+   \note Make sure you pass in both dim0, and dim1 in your dim4 arguments. The third
+   and fourth dimensions are currently ignored.
 
    \ingroup signal_func_convolve2
  */

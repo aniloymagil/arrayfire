@@ -14,6 +14,7 @@
 #include <backend.hpp>
 #include <common/ArrayInfo.hpp>
 #include <common/err_common.hpp>
+#include <common/moddims.hpp>
 #include <handle.hpp>
 #include <lookup.hpp>
 #include <af/arith.h>
@@ -26,14 +27,23 @@
 #include <cmath>
 #include <vector>
 
-using namespace detail;
 using std::signbit;
 using std::swap;
 using std::vector;
 
+using af::dim4;
 using common::convert2Canonical;
 using common::createSpanIndex;
+using common::flat;
 using common::half;
+using detail::cdouble;
+using detail::cfloat;
+using detail::index;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 namespace common {
 af_index_t createSpanIndex() {
@@ -57,19 +67,22 @@ af_seq convert2Canonical(const af_seq s, const dim_t len) {
 
 template<typename T>
 static af_array indexBySeqs(const af_array& src,
-                            const vector<af_seq> indicesV) {
-    size_t ndims = indicesV.size();
-    auto input   = getArray<T>(src);
+                            const vector<af_seq>& indicesV) {
+    auto ndims        = static_cast<dim_t>(indicesV.size());
+    const auto& input = getArray<T>(src);
 
-    if (ndims == 1 && ndims != input.ndims())
-        return getHandle(createSubArray(::flat(input), indicesV));
-    else
+    if (ndims == 1U && ndims != input.ndims()) {
+        return getHandle(createSubArray(flat(input), indicesV));
+    } else {
         return getHandle(createSubArray(input, indicesV));
+    }
 }
 
 af_err af_index(af_array* result, const af_array in, const unsigned ndims,
                 const af_seq* indices) {
     try {
+        ARG_ASSERT(2, (ndims > 0 && ndims <= AF_MAX_DIMS));
+
         const ArrayInfo& inInfo = getInfo(in);
         af_dtype type           = inInfo.getType();
         const dim4& iDims       = inInfo.dims();
@@ -191,7 +204,7 @@ static inline af_array genIndex(const af_array& in, const af_index_t idxrs[]) {
 af_err af_index_gen(af_array* out, const af_array in, const dim_t ndims,
                     const af_index_t* indexs) {
     try {
-        ARG_ASSERT(2, (ndims > 0));
+        ARG_ASSERT(2, (ndims > 0 && ndims <= AF_MAX_DIMS));
         ARG_ASSERT(3, (indexs != NULL));
 
         const ArrayInfo& iInfo = getInfo(in);
@@ -203,7 +216,7 @@ af_err af_index_gen(af_array* out, const af_array in, const dim_t ndims,
             return AF_SUCCESS;
         }
 
-        if (ndims == 1 && ndims != (dim_t)iInfo.ndims()) {
+        if (ndims == 1 && ndims != static_cast<dim_t>(iInfo.ndims())) {
             af_array in_ = 0;
             AF_CHECK(af_flat(&in_, in));
             AF_CHECK(af_index_gen(out, in_, ndims, indexs));
@@ -212,7 +225,7 @@ af_err af_index_gen(af_array* out, const af_array in, const dim_t ndims,
         }
 
         int track = 0;
-        std::array<af_seq, AF_MAX_DIMS> seqs;
+        std::array<af_seq, AF_MAX_DIMS> seqs{};
         seqs.fill(af_span);
         for (dim_t i = 0; i < ndims; i++) {
             if (indexs[i].isSeq) {
@@ -221,9 +234,11 @@ af_err af_index_gen(af_array* out, const af_array in, const dim_t ndims,
             }
         }
 
-        if (track == (int)ndims) return af_index(out, in, ndims, seqs.data());
+        if (track == static_cast<int>(ndims)) {
+            return af_index(out, in, ndims, seqs.data());
+        }
 
-        std::array<af_index_t, AF_MAX_DIMS> idxrs;
+        std::array<af_index_t, AF_MAX_DIMS> idxrs{};
 
         for (dim_t i = 0; i < AF_MAX_DIMS; ++i) {
             if (i < ndims) {
@@ -289,7 +304,7 @@ af_seq af_make_seq(double begin, double end, double step) {
 
 af_err af_create_indexers(af_index_t** indexers) {
     try {
-        af_index_t* out = new af_index_t[AF_MAX_DIMS];
+        auto* out = new af_index_t[AF_MAX_DIMS];
         for (int i = 0; i < AF_MAX_DIMS; ++i) {
             out[i].idx.seq = af_span;
             out[i].isSeq   = true;

@@ -30,9 +30,14 @@
 
 #include <af/index.h>
 
-using namespace detail;
-
 using common::half;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 using std::cout;
 using std::endl;
 using std::ostream;
@@ -44,6 +49,7 @@ static void printer(ostream &out, const T *ptr, const ArrayInfo &info,
     dim_t stride = info.strides()[dim];
     dim_t d      = info.dims()[dim];
     ToNum<T> toNum;
+    using namespace detail;  // NOLINT
 
     if (dim == 0) {
         for (dim_t i = 0, j = 0; i < d; i++, j += stride) {
@@ -266,11 +272,15 @@ af_err af_array_to_string(char **output, const char *exp, const af_array arr,
                 case u16:
                     print<ushort>(exp, arr, precision, ss, transpose);
                     break;
+                case f16:
+                    print<half>(exp, arr, precision, ss, transpose);
+                    break;
                 default: TYPE_ERROR(1, type);
             }
         }
         std::string str = ss.str();
-        af_alloc_host((void **)output, sizeof(char) * (str.size() + 1));
+        af_alloc_host(reinterpret_cast<void **>(output),
+                      sizeof(char) * (str.size() + 1));
         str.copy(*output, str.size());
         (*output)[str.size()] = '\0';  // don't forget the terminating 0
     }

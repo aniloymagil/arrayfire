@@ -9,27 +9,28 @@
 
 #include <common/err_common.hpp>
 #include <handle.hpp>
-#include <scan.hpp>
+#include <imgproc_common.hpp>
 #include <af/defines.h>
 #include <af/image.h>
 
 using af::dim4;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 template<typename To, typename Ti>
-static af_array sat(const af_array& in) {
-    const Array<To> input = castArray<To>(in);
-
-    Array<To> hprefix_scan = scan<af_add_t, To, To>(input, 0);
-    Array<To> vprefix_scan = scan<af_add_t, To, To>(hprefix_scan, 1);
-
-    return getHandle<To>(vprefix_scan);
+inline af_array sat(const af_array& in) {
+    return getHandle<To>(common::integralImage<To, Ti>(getArray<Ti>(in)));
 }
 
 af_err af_sat(af_array* out, const af_array in) {
     try {
         const ArrayInfo& info = getInfo(in);
-        const dim4 dims       = info.dims();
+        const dim4& dims      = info.dims();
 
         ARG_ASSERT(1, (dims.ndims() >= 2));
 

@@ -18,7 +18,8 @@
 #include <af/vision.h>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::createEmptyArray;
 
 template<typename T, typename convAccT>
 static void sift(af_features& feat_, af_array& descriptors, const af_array& in,
@@ -56,7 +57,6 @@ af_err af_sift(af_features* feat, af_array* desc, const af_array in,
                const bool double_input, const float img_scale,
                const float feature_ratio) {
     try {
-#ifdef AF_WITH_NONFREE_SIFT
         const ArrayInfo& info = getInfo(in);
         af::dim4 dims         = info.dims();
 
@@ -88,21 +88,6 @@ af_err af_sift(af_features* feat, af_array* desc, const af_array in,
             default: TYPE_ERROR(1, type);
         }
         std::swap(*desc, tmp_desc);
-#else
-        UNUSED(feat);
-        UNUSED(desc);
-        UNUSED(in);
-        UNUSED(n_layers);
-        UNUSED(contrast_thr);
-        UNUSED(edge_thr);
-        UNUSED(init_sigma);
-        UNUSED(double_input);
-        UNUSED(img_scale);
-        UNUSED(feature_ratio);
-        AF_ERROR(
-            "ArrayFire was not built with nonfree support, SIFT disabled\n",
-            AF_ERR_NONFREE);
-#endif
     }
     CATCHALL;
 
@@ -115,7 +100,6 @@ af_err af_gloh(af_features* feat, af_array* desc, const af_array in,
                const bool double_input, const float img_scale,
                const float feature_ratio) {
     try {
-#ifdef AF_WITH_NONFREE_SIFT
         const ArrayInfo& info = getInfo(in);
         af::dim4 dims         = info.dims();
 
@@ -129,7 +113,7 @@ af_err af_gloh(af_features* feat, af_array* desc, const af_array in,
         ARG_ASSERT(9, feature_ratio > 0.0f);
 
         dim_t in_ndims = dims.ndims();
-        DIM_ASSERT(1, (in_ndims <= 3 && in_ndims >= 2));
+        DIM_ASSERT(1, (in_ndims == 2));
 
         af_array tmp_desc;
         af_dtype type = info.getType();
@@ -147,21 +131,6 @@ af_err af_gloh(af_features* feat, af_array* desc, const af_array in,
             default: TYPE_ERROR(1, type);
         }
         std::swap(*desc, tmp_desc);
-#else
-        UNUSED(feat);
-        UNUSED(desc);
-        UNUSED(in);
-        UNUSED(n_layers);
-        UNUSED(contrast_thr);
-        UNUSED(edge_thr);
-        UNUSED(init_sigma);
-        UNUSED(double_input);
-        UNUSED(img_scale);
-        UNUSED(feature_ratio);
-        AF_ERROR(
-            "ArrayFire was not built with nonfree support, GLOH disabled\n",
-            AF_ERR_NONFREE);
-#endif
     }
     CATCHALL;
 

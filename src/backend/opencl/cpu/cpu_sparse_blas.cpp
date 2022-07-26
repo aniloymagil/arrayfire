@@ -57,8 +57,8 @@ using scale_type =
                          const typename blas_base<T>::type, const T>::type;
 
 template<typename To, typename Ti>
-To getScaleValue(Ti val) {
-    return (To)(val);
+auto getScaleValue(Ti val) -> std::remove_cv_t<To> {
+    return static_cast<std::remove_cv_t<To>>(val);
 }
 
 #ifdef USE_MKL
@@ -101,16 +101,15 @@ using create_csr_func_def = sparse_status_t (*)(sparse_matrix_t *,
 
 template<typename T>
 using mv_func_def = sparse_status_t (*)(sparse_operation_t, scale_type<T>,
-                                        const sparse_matrix_t,
-                                        matrix_descr, cptr_type<T>,
-                                        scale_type<T>, ptr_type<T>);
+                                        const sparse_matrix_t, matrix_descr,
+                                        cptr_type<T>, scale_type<T>,
+                                        ptr_type<T>);
 
 template<typename T>
 using mm_func_def = sparse_status_t (*)(sparse_operation_t, scale_type<T>,
-                                        const sparse_matrix_t,
-                                        matrix_descr, sparse_layout_t,
-                                        cptr_type<T>, int, int, scale_type<T>,
-                                        ptr_type<T>, int);
+                                        const sparse_matrix_t, matrix_descr,
+                                        sparse_layout_t, cptr_type<T>, int, int,
+                                        scale_type<T>, ptr_type<T>, int);
 
 #define SPARSE_FUNC_DEF(FUNC) \
     template<typename T>      \
@@ -144,7 +143,7 @@ SPARSE_FUNC(mm, cdouble, z)
 #undef SPARSE_FUNC_DEF
 
 template<>
-const sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
+sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
     sp_cfloat ret;
     ret.real = val.s[0];
     ret.imag = val.s[1];
@@ -152,7 +151,7 @@ const sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
 }
 
 template<>
-const sp_cdouble getScaleValue<const sp_cdouble, cdouble>(cdouble val) {
+sp_cdouble getScaleValue<const sp_cdouble, cdouble>(cdouble val) {
     sp_cdouble ret;
     ret.real = val.s[0];
     ret.imag = val.s[1];
@@ -182,7 +181,7 @@ sparse_operation_t toSparseTranspose(af_mat_prop opt) {
 }
 
 template<typename T, int value>
-scale_type<T> getScale() {
+scale_type<T> getScale() {  // NOLINT(readability-const-return-type)
     thread_local T val = scalar<T>(value);
     return getScaleValue<scale_type<T>, T>(val);
 }
@@ -224,25 +223,25 @@ Array<T> matmul(const common::SparseArray<T> lhs, const Array<T> rhs,
     int ldc = out.strides()[1];
 
     // get host pointers from mapped memory
-    auto rhsPtr = rhs.getMappedPtr();
-    auto outPtr = out.getMappedPtr();
+    mapped_ptr<T> rhsPtr = rhs.getMappedPtr(CL_MAP_READ);
+    mapped_ptr<T> outPtr = out.getMappedPtr();
 
     Array<T> values   = lhs.getValues();
     Array<int> rowIdx = lhs.getRowIdx();
     Array<int> colIdx = lhs.getColIdx();
 
-    auto vPtr = values.getMappedPtr();
-    auto rPtr = rowIdx.getMappedPtr();
-    auto cPtr = colIdx.getMappedPtr();
-    int *pB   = rPtr.get();
-    int *pE   = rPtr.get() + 1;
+    mapped_ptr<T> vPtr   = values.getMappedPtr();
+    mapped_ptr<int> rPtr = rowIdx.getMappedPtr();
+    mapped_ptr<int> cPtr = colIdx.getMappedPtr();
+    int *pB              = rPtr.get();
+    int *pE              = rPtr.get() + 1;
 
     sparse_matrix_t csrLhs;
     create_csr_func<T>()(&csrLhs, SPARSE_INDEX_BASE_ZERO, lhs.dims()[0],
                          lhs.dims()[1], pB, pE, cPtr.get(),
                          reinterpret_cast<ptr_type<T>>(vPtr.get()));
 
-    struct matrix_descr descrLhs;
+    struct matrix_descr descrLhs {};
     descrLhs.type = SPARSE_MATRIX_TYPE_GENERAL;
 
     mkl_sparse_optimize(csrLhs);
@@ -294,11 +293,11 @@ template<typename T, bool conjugate>
 void mv(Array<T> output, const Array<T> values, const Array<int> rowIdx,
         const Array<int> colIdx, const Array<T> right, int M) {
     UNUSED(M);
-    auto oPtr   = output.getMappedPtr();
-    auto rhtPtr = right.getMappedPtr();
-    auto vPtr   = values.getMappedPtr();
-    auto rPtr   = rowIdx.getMappedPtr();
-    auto cPtr   = colIdx.getMappedPtr();
+    mapped_ptr<T> oPtr   = output.getMappedPtr();
+    mapped_ptr<T> rhtPtr = right.getMappedPtr();
+    mapped_ptr<T> vPtr   = values.getMappedPtr();
+    mapped_ptr<int> rPtr = rowIdx.getMappedPtr();
+    mapped_ptr<int> cPtr = colIdx.getMappedPtr();
 
     T const *const valPtr   = vPtr.get();
     int const *const rowPtr = rPtr.get();
@@ -323,11 +322,11 @@ void mv(Array<T> output, const Array<T> values, const Array<int> rowIdx,
 template<typename T, bool conjugate>
 void mtv(Array<T> output, const Array<T> values, const Array<int> rowIdx,
          const Array<int> colIdx, const Array<T> right, int M) {
-    auto oPtr   = output.getMappedPtr();
-    auto rhtPtr = right.getMappedPtr();
-    auto vPtr   = values.getMappedPtr();
-    auto rPtr   = rowIdx.getMappedPtr();
-    auto cPtr   = colIdx.getMappedPtr();
+    mapped_ptr<T> oPtr   = output.getMappedPtr();
+    mapped_ptr<T> rhtPtr = right.getMappedPtr();
+    mapped_ptr<T> vPtr   = values.getMappedPtr();
+    mapped_ptr<int> rPtr = rowIdx.getMappedPtr();
+    mapped_ptr<int> cPtr = colIdx.getMappedPtr();
 
     T const *const valPtr   = vPtr.get();
     int const *const rowPtr = rPtr.get();
@@ -355,11 +354,11 @@ void mm(Array<T> output, const Array<T> values, const Array<int> rowIdx,
         const Array<int> colIdx, const Array<T> right, int M, int N, int ldb,
         int ldc) {
     UNUSED(M);
-    auto oPtr   = output.getMappedPtr();
-    auto rhtPtr = right.getMappedPtr();
-    auto vPtr   = values.getMappedPtr();
-    auto rPtr   = rowIdx.getMappedPtr();
-    auto cPtr   = colIdx.getMappedPtr();
+    mapped_ptr<T> oPtr   = output.getMappedPtr();
+    mapped_ptr<T> rhtPtr = right.getMappedPtr();
+    mapped_ptr<T> vPtr   = values.getMappedPtr();
+    mapped_ptr<int> rPtr = rowIdx.getMappedPtr();
+    mapped_ptr<int> cPtr = colIdx.getMappedPtr();
 
     T const *const valPtr   = vPtr.get();
     int const *const rowPtr = rPtr.get();
@@ -389,11 +388,11 @@ template<typename T, bool conjugate>
 void mtm(Array<T> output, const Array<T> values, const Array<int> rowIdx,
          const Array<int> colIdx, const Array<T> right, int M, int N, int ldb,
          int ldc) {
-    auto oPtr   = output.getMappedPtr();
-    auto rhtPtr = right.getMappedPtr();
-    auto vPtr   = values.getMappedPtr();
-    auto rPtr   = rowIdx.getMappedPtr();
-    auto cPtr   = colIdx.getMappedPtr();
+    mapped_ptr<T> oPtr   = output.getMappedPtr();
+    mapped_ptr<T> rhtPtr = right.getMappedPtr();
+    mapped_ptr<T> vPtr   = values.getMappedPtr();
+    mapped_ptr<int> rPtr = rowIdx.getMappedPtr();
+    mapped_ptr<int> cPtr = colIdx.getMappedPtr();
 
     T const *const valPtr   = vPtr.get();
     int const *const rowPtr = rPtr.get();

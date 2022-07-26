@@ -9,14 +9,13 @@
 
 #pragma once
 #include <Array.hpp>
-#include <common/jit/UnaryNode.hpp>
 #include <common/half.hpp>
+#include <common/jit/UnaryNode.hpp>
 #include <err_cuda.hpp>
 #include <math.hpp>
 #include <optypes.hpp>
 #include <types.hpp>
 #include <af/dim4.hpp>
-#include <complex>
 
 namespace cuda {
 
@@ -74,30 +73,14 @@ struct CastOp<cdouble, cdouble> {
     const char *name() { return "__convert_z2z"; }
 };
 
+// Casting from half to unsigned char causes compilation issues. First convert
+// to short then to half
+template<>
+struct CastOp<unsigned char, common::half> {
+    const char *name() { return "(short)"; }
+};
+
 #undef CAST_FN
 #undef CAST_CFN
-
-template<typename To, typename Ti>
-struct CastWrapper {
-    Array<To> operator()(const Array<Ti> &in) {
-        CastOp<To, Ti> cop;
-        common::Node_ptr in_node = in.getNode();
-        common::UnaryNode *node =
-            new common::UnaryNode(getFullName<To>(), shortname<To>(true),
-                                  cop.name(), in_node, af_cast_t);
-        return createNodeArray<To>(in.dims(), common::Node_ptr(node));
-    }
-};
-
-template<typename T>
-struct CastWrapper<T, T> {
-    Array<T> operator()(const Array<T> &in) { return in; }
-};
-
-template<typename To, typename Ti>
-Array<To> cast(const Array<Ti> &in) {
-    CastWrapper<To, Ti> cast_op;
-    return cast_op(in);
-}
 
 }  // namespace cuda

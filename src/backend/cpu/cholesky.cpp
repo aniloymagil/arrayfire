@@ -9,6 +9,8 @@
 
 #include <cholesky.hpp>
 
+#include <common/err_common.hpp>
+
 #if defined(WITH_LINEAR_ALGEBRA)
 
 #include <Array.hpp>
@@ -48,10 +50,7 @@ Array<T> cholesky(int *info, const Array<T> &in, const bool is_upper) {
     Array<T> out = copyArray<T>(in);
     *info        = cholesky_inplace(out, is_upper);
 
-    if (is_upper)
-        triangle<T, true, false>(out, out);
-    else
-        triangle<T, false, false>(out, out);
+    triangle<T>(out, out, is_upper, false);
 
     return out;
 }
@@ -62,7 +61,7 @@ int cholesky_inplace(Array<T> &in, const bool is_upper) {
     int N      = iDims[0];
 
     char uplo = 'L';
-    if (is_upper) uplo = 'U';
+    if (is_upper) { uplo = 'U'; }
 
     int info  = 0;
     auto func = [&](int *info, Param<T> in) {

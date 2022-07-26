@@ -19,86 +19,104 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #ifdef AF_OPENCL
 #include <errorcodes.hpp>
 #include <platform.hpp>
 #endif
 
+using std::move;
 using std::string;
 using std::stringstream;
 
+using common::is_stacktrace_enabled;
+
 AfError::AfError(const char *const func, const char *const file, const int line,
-                 const char *const message, af_err err)
+                 const char *const message, af_err err,
+                 boost::stacktrace::stacktrace st)
     : logic_error(message)
     , functionName(func)
     , fileName(file)
     , lineNumber(line)
-    , error(err) {}
+    , error(err)
+    , st_(move(st)) {}
 
-AfError::AfError(string func, string file, const int line, string message,
-                 af_err err)
+AfError::AfError(string func, string file, const int line,
+                 const string &message, af_err err,
+                 boost::stacktrace::stacktrace st)
     : logic_error(message)
-    , functionName(func)
-    , fileName(file)
+    , functionName(move(func))
+    , fileName(move(file))
     , lineNumber(line)
-    , error(err) {}
+    , error(err)
+    , st_(move(st)) {}
 
-const string &AfError::getFunctionName() const { return functionName; }
+const string &AfError::getFunctionName() const noexcept { return functionName; }
 
-const string &AfError::getFileName() const { return fileName; }
+const string &AfError::getFileName() const noexcept { return fileName; }
 
-int AfError::getLine() const { return lineNumber; }
+int AfError::getLine() const noexcept { return lineNumber; }
 
-af_err AfError::getError() const { return error; }
+af_err AfError::getError() const noexcept { return error; }
 
-AfError::~AfError() throw() {}
+AfError::~AfError() noexcept = default;
 
 TypeError::TypeError(const char *const func, const char *const file,
-                     const int line, const int index, const af_dtype type)
-    : AfError(func, file, line, "Invalid data type", AF_ERR_TYPE)
+                     const int line, const int index, const af_dtype type,
+                     boost::stacktrace::stacktrace st)
+    : AfError(func, file, line, "Invalid data type", AF_ERR_TYPE, move(st))
     , argIndex(index)
     , errTypeName(getName(type)) {}
 
-const string &TypeError::getTypeName() const { return errTypeName; }
+const string &TypeError::getTypeName() const noexcept { return errTypeName; }
 
-int TypeError::getArgIndex() const { return argIndex; }
+int TypeError::getArgIndex() const noexcept { return argIndex; }
 
 ArgumentError::ArgumentError(const char *const func, const char *const file,
                              const int line, const int index,
-                             const char *const expectString)
-    : AfError(func, file, line, "Invalid argument", AF_ERR_ARG)
+                             const char *const expectString,
+                             boost::stacktrace::stacktrace st)
+    : AfError(func, file, line, "Invalid argument", AF_ERR_ARG, move(st))
     , argIndex(index)
     , expected(expectString) {}
 
-const string &ArgumentError::getExpectedCondition() const { return expected; }
+const string &ArgumentError::getExpectedCondition() const noexcept {
+    return expected;
+}
 
-int ArgumentError::getArgIndex() const { return argIndex; }
+int ArgumentError::getArgIndex() const noexcept { return argIndex; }
 
 SupportError::SupportError(const char *const func, const char *const file,
-                           const int line, const char *const back)
-    : AfError(func, file, line, "Unsupported Error", AF_ERR_NOT_SUPPORTED)
+                           const int line, const char *const back,
+                           boost::stacktrace::stacktrace st)
+    : AfError(func, file, line, "Unsupported Error", AF_ERR_NOT_SUPPORTED,
+              move(st))
     , backend(back) {}
 
-const string &SupportError::getBackendName() const { return backend; }
+const string &SupportError::getBackendName() const noexcept { return backend; }
 
 DimensionError::DimensionError(const char *const func, const char *const file,
                                const int line, const int index,
-                               const char *const expectString)
-    : AfError(func, file, line, "Invalid size", AF_ERR_SIZE)
+                               const char *const expectString,
+                               const boost::stacktrace::stacktrace &st)
+    : AfError(func, file, line, "Invalid size", AF_ERR_SIZE, st)
     , argIndex(index)
     , expected(expectString) {}
 
-const string &DimensionError::getExpectedCondition() const { return expected; }
+const string &DimensionError::getExpectedCondition() const noexcept {
+    return expected;
+}
 
-int DimensionError::getArgIndex() const { return argIndex; }
+int DimensionError::getArgIndex() const noexcept { return argIndex; }
 
-void print_error(const string &msg) {
+af_err set_global_error_string(const string &msg, af_err err) {
     std::string perr = getEnvVar("AF_PRINT_ERRORS");
     if (!perr.empty()) {
-        if (perr != "0") fprintf(stderr, "%s\n", msg.c_str());
+        if (perr != "0") { fprintf(stderr, "%s\n", msg.c_str()); }
     }
     get_global_error_string() = msg;
+    return err;
 }
 
 af_err processException() {
@@ -112,60 +130,57 @@ af_err processException() {
            << "In file " << ex.getFileName() << ":" << ex.getLine() << "\n"
            << "Invalid dimension for argument " << ex.getArgIndex() << "\n"
            << "Expected: " << ex.getExpectedCondition() << "\n";
+        if (is_stacktrace_enabled()) { ss << ex.getStacktrace(); }
 
-        print_error(ss.str());
-        err = AF_ERR_SIZE;
+        err = set_global_error_string(ss.str(), AF_ERR_SIZE);
     } catch (const ArgumentError &ex) {
         ss << "In function " << ex.getFunctionName() << "\n"
            << "In file " << ex.getFileName() << ":" << ex.getLine() << "\n"
            << "Invalid argument at index " << ex.getArgIndex() << "\n"
            << "Expected: " << ex.getExpectedCondition() << "\n";
 
-        print_error(ss.str());
-        err = AF_ERR_ARG;
+        if (is_stacktrace_enabled()) { ss << ex.getStacktrace(); }
+        err = set_global_error_string(ss.str(), AF_ERR_ARG);
     } catch (const SupportError &ex) {
         ss << ex.getFunctionName() << " not supported for "
            << ex.getBackendName() << " backend\n";
 
-        print_error(ss.str());
-        err = AF_ERR_NOT_SUPPORTED;
+        if (is_stacktrace_enabled()) { ss << ex.getStacktrace(); }
+        err = set_global_error_string(ss.str(), AF_ERR_NOT_SUPPORTED);
     } catch (const TypeError &ex) {
         ss << "In function " << ex.getFunctionName() << "\n"
            << "In file " << ex.getFileName() << ":" << ex.getLine() << "\n"
            << "Invalid type for argument " << ex.getArgIndex() << "\n";
 
-        print_error(ss.str());
-        err = AF_ERR_TYPE;
+        if (is_stacktrace_enabled()) { ss << ex.getStacktrace(); }
+        err = set_global_error_string(ss.str(), AF_ERR_TYPE);
     } catch (const AfError &ex) {
         ss << "In function " << ex.getFunctionName() << "\n"
            << "In file " << ex.getFileName() << ":" << ex.getLine() << "\n"
            << ex.what() << "\n";
+        if (is_stacktrace_enabled()) { ss << ex.getStacktrace(); }
 
-        print_error(ss.str());
-        err = ex.getError();
+        err = set_global_error_string(ss.str(), ex.getError());
 #ifdef AF_OPENCL
     } catch (const cl::Error &ex) {
         char opencl_err_msg[1024];
         snprintf(opencl_err_msg, sizeof(opencl_err_msg),
                  "OpenCL Error (%d): %s when calling %s", ex.err(),
                  getErrorMessage(ex.err()).c_str(), ex.what());
-        print_error(opencl_err_msg);
+
         if (ex.err() == CL_MEM_OBJECT_ALLOCATION_FAILURE) {
-            err = AF_ERR_NO_MEM;
+            err = set_global_error_string(opencl_err_msg, AF_ERR_NO_MEM);
         } else {
-            err = AF_ERR_INTERNAL;
+            err = set_global_error_string(opencl_err_msg, AF_ERR_INTERNAL);
         }
 #endif
-    } catch (...) {
-        print_error(ss.str());
-        err = AF_ERR_UNKNOWN;
-    }
+    } catch (...) { err = set_global_error_string(ss.str(), AF_ERR_UNKNOWN); }
 
     return err;
 }
 
-std::string &get_global_error_string() {
-    thread_local std::string *global_error_string = new std::string("");
+std::string &get_global_error_string() noexcept {
+    thread_local auto *global_error_string = new std::string("");
     return *global_error_string;
 }
 
@@ -181,6 +196,8 @@ const char *af_err_to_string(const af_err err) {
         case AF_ERR_TYPE: return "Function does not support this data type";
         case AF_ERR_DIFF_TYPE: return "Input types are not the same";
         case AF_ERR_BATCH: return "Invalid batch configuration";
+        case AF_ERR_DEVICE:
+            return "Input does not belong to the current device.";
         case AF_ERR_NOT_SUPPORTED: return "Function not supported";
         case AF_ERR_NOT_CONFIGURED: return "Function not configured to build";
         case AF_ERR_NONFREE:
@@ -199,7 +216,17 @@ const char *af_err_to_string(const af_err err) {
             return "There was a mismatch between an array and the current "
                    "backend";
         case AF_ERR_INTERNAL: return "Internal error";
-        case AF_ERR_UNKNOWN:
-        default: return "Unknown error";
+        case AF_ERR_UNKNOWN: return "Unknown error";
     }
+    return "Unknown error. Please open an issue and add this error code to the "
+           "case in af_err_to_string.";
 }
+
+namespace common {
+
+bool &is_stacktrace_enabled() noexcept {
+    static bool stacktrace_enabled = true;
+    return stacktrace_enabled;
+}
+
+}  // namespace common

@@ -353,7 +353,7 @@ SP_SP_ARITH_TESTS(cfloat,
                   1e-4)  // This is mostly for complex division in OpenCL
 SP_SP_ARITH_TESTS(cdouble, 1e-6)
 
-#if defined(USE_MTX)
+#if defined(USE_MTX) && defined(MTX_TEST_DIR)
 
 // Sparse-Sparse Arithmetic testing function using mtx files
 template<af_op_t op>
@@ -385,24 +385,20 @@ void ssArithmeticMTX(const char* op1, const char* op2) {
 }
 
 TEST(SparseSparseArith, LinearProgrammingData) {
-    std::string file1(TEST_DIR "/matrixmarket/LPnetlib/lpi_vol1/lpi_vol1.mtx");
-    std::string file2(TEST_DIR "/matrixmarket/LPnetlib/lpi_qual/lpi_qual.mtx");
+    std::string file1(MTX_TEST_DIR "LPnetlib/lpi_vol1/lpi_vol1.mtx");
+    std::string file2(MTX_TEST_DIR "LPnetlib/lpi_qual/lpi_qual.mtx");
     ssArithmeticMTX<af_add_t>(file1.c_str(), file2.c_str());
 }
 
 TEST(SparseSparseArith, SubsequentCircuitSimData) {
-    std::string file1(TEST_DIR
-                      "/matrixmarket/Sandia/oscil_dcop_12/oscil_dcop_12.mtx");
-    std::string file2(TEST_DIR
-                      "/matrixmarket/Sandia/oscil_dcop_42/oscil_dcop_42.mtx");
+    std::string file1(MTX_TEST_DIR "Sandia/oscil_dcop_12/oscil_dcop_12.mtx");
+    std::string file2(MTX_TEST_DIR "Sandia/oscil_dcop_42/oscil_dcop_42.mtx");
     ssArithmeticMTX<af_sub_t>(file1.c_str(), file2.c_str());
 }
 
 TEST(SparseSparseArith, QuantumChemistryData) {
-    std::string file1(TEST_DIR
-                      "/matrixmarket/QCD/conf6_0-4x4-20/conf6_0-4x4-20.mtx");
-    std::string file2(TEST_DIR
-                      "/matrixmarket/QCD/conf6_0-4x4-30/conf6_0-4x4-30.mtx");
+    std::string file1(MTX_TEST_DIR "QCD/conf6_0-4x4-20/conf6_0-4x4-20.mtx");
+    std::string file2(MTX_TEST_DIR "QCD/conf6_0-4x4-30/conf6_0-4x4-30.mtx");
     ssArithmeticMTX<af_add_t>(file1.c_str(), file2.c_str());
 }
 #endif

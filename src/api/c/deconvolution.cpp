@@ -10,7 +10,7 @@
 #include <Array.hpp>
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/dispatch.hpp>
 #include <common/err_common.hpp>
 #include <complex.hpp>
@@ -19,6 +19,7 @@
 #include <fftconvolve.hpp>
 #include <handle.hpp>
 #include <logic.hpp>
+#include <math.hpp>
 #include <reduce.hpp>
 #include <select.hpp>
 #include <shift.hpp>
@@ -26,12 +27,29 @@
 #include <af/image.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <type_traits>
 #include <vector>
 
 using af::dim4;
-using namespace detail;
+using common::cast;
+using detail::arithOp;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createSubArray;
+using detail::createValueArray;
+using detail::logicOp;
+using detail::padArrayBorders;
+using detail::scalar;
+using detail::select_scalar;
+using detail::shift;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
+using std::array;
+using std::vector;
 
 const int BASE_DIM = 2;
 
@@ -50,7 +68,7 @@ const dim_t GREATEST_PRIME_FACTOR = 7;
 
 template<typename T, typename CT>
 Array<T> complexNorm(const Array<CT>& input) {
-    auto mag  = abs<T, CT>(input);
+    auto mag  = detail::abs<T, CT>(input);
     auto TWOS = createValueArray(input.dims(), scalar<T>(2));
     return arithOp<T, af_pow_t>(mag, TWOS, input.dims());
 }
@@ -58,13 +76,13 @@ Array<T> complexNorm(const Array<CT>& input) {
 std::vector<af_seq> calcPadInfo(dim4& inLPad, dim4& psfLPad, dim4& inUPad,
                                 dim4& psfUPad, dim4& odims, dim_t nElems,
                                 const dim4& idims, const dim4& fdims) {
-    std::vector<af_seq> index(4);
+    vector<af_seq> index(4);
 
     for (int d = 0; d < 4; ++d) {
         if (d < BASE_DIM) {
             dim_t pad = idims[d] + fdims[d];
 
-            while (greatestPrimeFactor(pad) > GREATEST_PRIME_FACTOR) pad++;
+            while (greatestPrimeFactor(pad) > GREATEST_PRIME_FACTOR) { pad++; }
 
             dim_t diffLen  = pad - idims[d];
             inLPad[d]      = diffLen / 2;
@@ -95,13 +113,13 @@ void richardsonLucy(Array<T>& currentEstimate, const Array<T>& in,
                     const unsigned iters, const float normFactor,
                     const dim4 odims) {
     for (unsigned i = 0; i < iters; ++i) {
-        auto fft1  = fft_r2c<CT, T, BASE_DIM>(currentEstimate);
+        auto fft1  = fft_r2c<CT, T>(currentEstimate, BASE_DIM);
         auto cmul1 = arithOp<CT, af_mul_t>(fft1, P, P.dims());
-        auto ifft1 = fft_c2r<CT, T, BASE_DIM>(cmul1, normFactor, odims);
+        auto ifft1 = fft_c2r<CT, T>(cmul1, normFactor, odims, BASE_DIM);
         auto div1  = arithOp<T, af_div_t>(in, ifft1, in.dims());
-        auto fft2  = fft_r2c<CT, T, BASE_DIM>(div1);
+        auto fft2  = fft_r2c<CT, T>(div1, BASE_DIM);
         auto cmul2 = arithOp<CT, af_mul_t>(fft2, Pc, Pc.dims());
-        auto ifft2 = fft_c2r<CT, T, BASE_DIM>(cmul2, normFactor, odims);
+        auto ifft2 = fft_c2r<CT, T>(cmul2, normFactor, odims, BASE_DIM);
 
         currentEstimate =
             arithOp<T, af_mul_t>(currentEstimate, ifft2, ifft2.dims());
@@ -115,7 +133,7 @@ void landweber(Array<T>& currentEstimate, const Array<T>& in,
                const dim4 odims) {
     const dim4& dims = P.dims();
 
-    auto I        = fft_r2c<CT, T, BASE_DIM>(in);
+    auto I        = fft_r2c<CT, T>(in, BASE_DIM);
     auto Pn       = complexNorm<T, CT>(P);
     auto ONE      = createValueArray(dims, scalar<T>(1.0));
     auto alpha    = createValueArray(dims, scalar<T>(relaxFactor));
@@ -131,13 +149,13 @@ void landweber(Array<T>& currentEstimate, const Array<T>& in,
         auto mul = arithOp<CT, af_mul_t>(iterTemp, lhs, dims);
         iterTemp = arithOp<CT, af_add_t>(mul, rhs, dims);
     }
-    currentEstimate = fft_c2r<CT, T, BASE_DIM>(iterTemp, normFactor, odims);
+    currentEstimate = fft_c2r<CT, T>(iterTemp, normFactor, odims, BASE_DIM);
 }
 
 template<typename InputType, typename RealType = float>
 af_array iterDeconv(const af_array in, const af_array ker, const uint iters,
                     const float rfactor, const af_iterative_deconv_algo algo) {
-    typedef RealType T;
+    using T    = RealType;
     using CT   = typename std::conditional<std::is_same<T, double>::value,
                                          cdouble, cfloat>::type;
     auto input = castArray<T>(in);
@@ -154,24 +172,25 @@ af_array iterDeconv(const af_array in, const af_array ker, const uint iters,
         padArrayBorders<T>(input, inLPad, inUPad, AF_PAD_CLAMP_TO_EDGE);
     auto paddedPsf = padArrayBorders<T>(psf, psfLPad, psfUPad, AF_PAD_ZERO);
 
-    const int shiftDims[4] = {-int(fdims[0] / 2), -int(fdims[1] / 2), 0, 0};
-    auto shiftedPsf        = shift(paddedPsf, shiftDims);
+    const std::array<int, 4> shiftDims = {-int(fdims[0] / 2),
+                                          -int(fdims[1] / 2), 0, 0};
+    auto shiftedPsf                    = shift(paddedPsf, shiftDims.data());
 
-    auto P  = fft_r2c<CT, T, BASE_DIM>(shiftedPsf);
+    auto P  = fft_r2c<CT, T>(shiftedPsf, BASE_DIM);
     auto Pc = conj(P);
 
     Array<T> currentEstimate = paddedIn;
-    const double normFactor  = 1 / (double)nElems;
+    const double normFactor  = 1 / static_cast<double>(nElems);
 
     switch (algo) {
         case AF_ITERATIVE_DECONV_RICHARDSONLUCY:
             richardsonLucy(currentEstimate, paddedIn, P, Pc, iters, normFactor,
                            odims);
             break;
+        case AF_ITERATIVE_DECONV_LANDWEBER:
         default:
             landweber(currentEstimate, paddedIn, P, Pc, iters, rfactor,
                       normFactor, odims);
-            break;
     }
     return getHandle(createSubArray<T>(currentEstimate, index));
 }
@@ -220,7 +239,7 @@ af_err af_iterative_deconv(af_array* out, const af_array in, const af_array ker,
 template<typename CT>
 Array<CT> denominator(const Array<CT>& I, const Array<CT>& P, const float gamma,
                       const af_inverse_deconv_algo algo) {
-    typedef typename af::dtype_traits<CT>::base_type T;
+    using T = typename af::dtype_traits<CT>::base_type;
 
     auto RCNST = createValueArray(I.dims(), scalar<T>(gamma));
 
@@ -245,7 +264,7 @@ Array<CT> denominator(const Array<CT>& I, const Array<CT>& P, const float gamma,
 template<typename InputType, typename RealType = float>
 af_array invDeconv(const af_array in, const af_array ker, const float gamma,
                    const af_inverse_deconv_algo algo) {
-    typedef RealType T;
+    using T    = RealType;
     using CT   = typename std::conditional<std::is_same<T, double>::value,
                                          cdouble, cfloat>::type;
     auto input = castArray<T>(in);
@@ -261,23 +280,25 @@ af_array invDeconv(const af_array in, const af_array ker, const float gamma,
     auto paddedIn =
         padArrayBorders<T>(input, inLPad, inUPad, AF_PAD_CLAMP_TO_EDGE);
     auto paddedPsf = padArrayBorders<T>(psf, psfLPad, psfUPad, AF_PAD_ZERO);
-    const int shiftDims[4] = {-int(fdims[0] / 2), -int(fdims[1] / 2), 0, 0};
+    const array<int, 4> shiftDims = {-int(fdims[0] / 2), -int(fdims[1] / 2), 0,
+                                     0};
 
-    auto shiftedPsf = shift(paddedPsf, shiftDims);
+    auto shiftedPsf = shift(paddedPsf, shiftDims.data());
 
-    auto I      = fft_r2c<CT, T, BASE_DIM>(paddedIn);
-    auto P      = fft_r2c<CT, T, BASE_DIM>(shiftedPsf);
+    auto I      = fft_r2c<CT, T>(paddedIn, BASE_DIM);
+    auto P      = fft_r2c<CT, T>(shiftedPsf, BASE_DIM);
     auto Pc     = conj(P);
     auto numer  = arithOp<CT, af_mul_t>(I, Pc, I.dims());
     auto denom  = denominator(I, P, gamma, algo);
-    auto absVal = abs<T, CT>(denom);
+    auto absVal = detail::abs<T, CT>(denom);
     auto THRESH = createValueArray(I.dims(), scalar<T>(gamma));
     auto cond   = logicOp<T, af_ge_t>(absVal, THRESH, absVal.dims());
     auto val    = arithOp<CT, af_div_t>(numer, denom, numer.dims());
 
-    select_scalar<CT, false>(val, cond, val, 0);
+    select_scalar<CT, false>(val, cond, val, scalar<CT>(0.0));
 
-    auto ival = fft_c2r<CT, T, BASE_DIM>(val, 1 / (double)nElems, odims);
+    auto ival =
+        fft_c2r<CT, T>(val, 1 / static_cast<double>(nElems), odims, BASE_DIM);
 
     return getHandle(createSubArray<T>(ival, index));
 }

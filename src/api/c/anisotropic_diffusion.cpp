@@ -11,29 +11,37 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <copy.hpp>
 #include <gradient.hpp>
 #include <handle.hpp>
 #include <reduce.hpp>
+
 #include <af/dim4.hpp>
 #include <af/image.h>
 
 #include <type_traits>
 
 using af::dim4;
-using namespace detail;
+using common::cast;
+using detail::arithOp;
+using detail::Array;
+using detail::createEmptyArray;
+using detail::getScalar;
+using detail::gradient;
+using detail::reduce_all;
 
 template<typename T>
-af_array diffusion(const Array<float> in, const float dt, const float K,
+af_array diffusion(const Array<float>& in, const float dt, const float K,
                    const unsigned iterations, const af_flux_function fftype,
                    const af::diffusionEq eq) {
-    auto out   = copyArray(in);
-    auto dims  = out.dims();
-    auto g0    = createEmptyArray<float>(dims);
-    auto g1    = createEmptyArray<float>(dims);
-    float cnst = -2.0f * K * K / dims.elements();
+    auto out  = copyArray(in);
+    auto dims = out.dims();
+    auto g0   = createEmptyArray<float>(dims);
+    auto g1   = createEmptyArray<float>(dims);
+    float cnst =
+        -2.0f * K * K / dims.elements();  // NOLINT(readability-magic-numbers)
 
     for (unsigned i = 0; i < iterations; ++i) {
         gradient<float>(g0, g1, out);
@@ -41,7 +49,8 @@ af_array diffusion(const Array<float> in, const float dt, const float K,
         auto g0Sqr = arithOp<float, af_mul_t>(g0, g0, dims);
         auto g1Sqr = arithOp<float, af_mul_t>(g1, g1, dims);
         auto sumd  = arithOp<float, af_add_t>(g0Sqr, g1Sqr, dims);
-        float avg  = reduce_all<af_add_t, float, float>(sumd, true, 0);
+        float avg =
+            getScalar<float>(reduce_all<af_add_t, float, float>(sumd, true, 0));
 
         anisotropicDiffusion(out, dt, 1.0f / (cnst * avg), fftype, eq);
     }
@@ -71,7 +80,7 @@ af_err af_anisotropic_diffusion(af_array* out, const af_array in,
 
         auto input = castArray<float>(in);
 
-        af_array output = 0;
+        af_array output = nullptr;
         switch (inputType) {
             case f64:
                 output = diffusion<double>(input, dt, K, iterations, F, eq);

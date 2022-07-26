@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
 #include <Array.hpp>
 #include <common/jit/NaryNode.hpp>
 #include <common/jit/UnaryNode.hpp>
@@ -66,8 +67,9 @@ UNARY_FN(signbit)
 UNARY_FN(ceil)
 UNARY_FN(floor)
 
-UNARY_FN(isinf)
-UNARY_FN(isnan)
+UNARY_DECL(bitnot, "__bitnot")
+UNARY_DECL(isinf, "__isinf")
+UNARY_DECL(isnan, "__isnan")
 UNARY_FN(iszero)
 UNARY_DECL(noop, "__noop")
 
@@ -82,7 +84,8 @@ Array<T> unaryOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
 
     auto createUnary = [](array<Node_ptr, 1> &operands) {
         return common::Node_ptr(new common::UnaryNode(
-            getFullName<T>(), shortname<T>(true), unaryName<op>(), operands[0], op));
+            static_cast<af::dtype>(af::dtype_traits<T>::af_type),
+            unaryName<op>(), operands[0], op));
     };
 
     if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
@@ -95,9 +98,9 @@ Array<char> checkOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
     using common::Node_ptr;
 
     auto createUnary = [](std::array<Node_ptr, 1> &operands) {
-        return Node_ptr(
-            new common::UnaryNode(getFullName<char>(), shortname<char>(true),
-                                  unaryName<op>(), operands[0], op));
+        return Node_ptr(new common::UnaryNode(
+            static_cast<af::dtype>(dtype_traits<char>::af_type),
+            unaryName<op>(), operands[0], op));
     };
 
     if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }

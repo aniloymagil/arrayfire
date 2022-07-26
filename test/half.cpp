@@ -6,7 +6,7 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
+
 #include <arrayfire.h>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -53,9 +53,7 @@ INSTANTIATE_TEST_CASE_P(FromF16, HalfConvert,
                                           convert_params(f16, f64, 10),
                                           convert_params(f16, s32, 10),
                                           convert_params(f16, u32, 10),
-                                          // causes compilation failures with
-                                          // nvrtc
-                                          // convert_params(f16, u8, 10),
+                                          convert_params(f16, u8, 10),
                                           convert_params(f16, s64, 10),
                                           convert_params(f16, u64, 10),
                                           convert_params(f16, s16, 10),
@@ -85,4 +83,58 @@ TEST(Half, arith) {
     array result = bb + aa;
 
     ASSERT_ARRAYS_EQ(gold, result);
+}
+
+TEST(Half, isInf) {
+    SUPPORTED_TYPE_CHECK(af_half);
+    half_float::half hinf = std::numeric_limits<half_float::half>::infinity();
+
+    vector<half_float::half> input(2, half_float::half(0));
+    input[0] = hinf;
+
+    array infarr(2, &input.front());
+
+    array res = isInf(infarr);
+
+    vector<char> hgold(2, 0);
+    hgold[0] = 1;
+    array gold(2, &hgold.front());
+
+    ASSERT_ARRAYS_EQ(gold, res);
+}
+
+TEST(Half, isNan) {
+    SUPPORTED_TYPE_CHECK(af_half);
+    half_float::half hnan = std::numeric_limits<half_float::half>::quiet_NaN();
+
+    vector<half_float::half> input(2, half_float::half(0));
+    input[0] = hnan;
+
+    array nanarr(2, &input.front());
+
+    array res = isNaN(nanarr);
+
+    vector<char> hgold(2, 0);
+    hgold[0] = 1;
+    array gold(2, &hgold.front());
+
+    ASSERT_ARRAYS_EQ(gold, res);
+}
+
+TEST(Half, isZero) {
+    SUPPORTED_TYPE_CHECK(af_half);
+    half_float::half hzero(0.f);
+
+    vector<half_float::half> input(2, half_float::half(1));
+    input[0] = hzero;
+
+    array nanarr(2, &input.front());
+
+    array res = iszero(nanarr);
+
+    vector<char> hgold(2, 0);
+    hgold[0] = 1;
+    array gold(2, &hgold.front());
+
+    ASSERT_ARRAYS_EQ(gold, res);
 }

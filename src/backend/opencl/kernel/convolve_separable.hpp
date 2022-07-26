@@ -8,20 +8,20 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
 
 namespace opencl {
-
 namespace kernel {
 
 // below shared MAX_*_LEN's are calculated based on
 // a maximum shared memory configuration of 48KB per block
 // considering complex types as well
-static const int MAX_SCONV_FILTER_LEN = 31;
+constexpr int MAX_SCONV_FILTER_LEN = 31;
 
-template<typename T, typename accT, int cDim, bool expand>
-void convSep(Param out, const Param sig, const Param filt);
+template<typename T, typename accT>
+void convSep(Param out, const Param sig, const Param filt, const int cDim,
+             const bool expand);
 
 }  // namespace kernel
-
 }  // namespace opencl

@@ -10,11 +10,9 @@
 #include <kernel/sparse.hpp>
 #include <sparse.hpp>
 
-#include <stdexcept>
-#include <string>
-
 #include <arith.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
+#include <common/moddims.hpp>
 #include <complex.hpp>
 #include <copy.hpp>
 #include <err_opencl.hpp>
@@ -24,6 +22,9 @@
 #include <range.hpp>
 #include <reduce.hpp>
 #include <where.hpp>
+
+#include <stdexcept>
+#include <string>
 
 namespace opencl {
 
@@ -49,8 +50,8 @@ SparseArray<T> sparseConvertDenseToCOO(const Array<T> &in) {
         arithOp<int, af_div_t>(nonZeroIdx, constDim, nonZeroIdx.dims());
 
     Array<T> values = copyArray<T>(in);
-    values.modDims(dim4(values.elements()));
-    values = lookup<T, int>(values, nonZeroIdx, 0);
+    values          = modDims(values, dim4(values.elements()));
+    values          = lookup<T, int>(values, nonZeroIdx, 0);
 
     return createArrayDataSparseArray<T>(in.dims(), values, rowIdx, colIdx,
                                          AF_STORAGE_COO);
@@ -60,7 +61,7 @@ template<typename T, af_storage stype>
 SparseArray<T> sparseConvertDenseToStorage(const Array<T> &in_) {
     in_.eval();
 
-    uint nNZ = reduce_all<af_notzero_t, T, uint>(in_);
+    uint nNZ = getScalar<uint>(reduce_all<af_notzero_t, T, uint>(in_));
 
     SparseArray<T> sparse_ = createEmptySparseArray<T>(in_.dims(), nNZ, stype);
     sparse_.eval();
@@ -94,9 +95,10 @@ Array<T> sparseConvertCOOToDense(const SparseArray<T> &in) {
 
 template<typename T, af_storage stype>
 Array<T> sparseConvertStorageToDense(const SparseArray<T> &in_) {
-    if (stype != AF_STORAGE_CSR)
+    if (stype != AF_STORAGE_CSR) {
         AF_ERROR("OpenCL Backend only supports CSR or COO to Dense",
                  AF_ERR_NOT_SUPPORTED);
+    }
 
     in_.eval();
 
@@ -107,11 +109,12 @@ Array<T> sparseConvertStorageToDense(const SparseArray<T> &in_) {
     const Array<int> &rowIdx = in_.getRowIdx();
     const Array<int> &colIdx = in_.getColIdx();
 
-    if (stype == AF_STORAGE_CSR)
+    if (stype == AF_STORAGE_CSR) {
         kernel::csr2dense<T>(dense_, values, rowIdx, colIdx);
-    else
+    } else {
         AF_ERROR("OpenCL Backend only supports CSR or COO to Dense",
                  AF_ERR_NOT_SUPPORTED);
+    }
 
     return dense_;
 }
@@ -120,8 +123,8 @@ template<typename T, af_storage dest, af_storage src>
 SparseArray<T> sparseConvertStorageToStorage(const SparseArray<T> &in) {
     in.eval();
 
-    SparseArray<T> converted =
-        createEmptySparseArray<T>(in.dims(), (int)in.getNNZ(), dest);
+    SparseArray<T> converted = createEmptySparseArray<T>(
+        in.dims(), static_cast<int>(in.getNNZ()), dest);
     converted.eval();
 
     if (src == AF_STORAGE_CSR && dest == AF_STORAGE_COO) {

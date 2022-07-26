@@ -7,8 +7,14 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <af/algorithm.h>
+#include <af/arith.h>
+#include <af/data.h>
 #include <af/defines.h>
 #include <af/dim4.hpp>
+#include <af/exception.h>
+#include <af/gfor.h>
+#include <af/random.h>
 #include <af/signal.h>
 #include <af/traits.hpp>
 
@@ -781,7 +787,7 @@ class Approx2V2 : public ::testing::Test {
     void releaseArrays() {
         if (pos2 != 0) { ASSERT_SUCCESS(af_release_array(pos2)); }
         if (pos1 != 0) { ASSERT_SUCCESS(af_release_array(pos1)); }
-        if (in != 0)   { ASSERT_SUCCESS(af_release_array(in)); }
+        if (in != 0) { ASSERT_SUCCESS(af_release_array(in)); }
         if (gold != 0) { ASSERT_SUCCESS(af_release_array(gold)); }
     }
 

@@ -7,7 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <tile.hpp>
+#include <common/tile.hpp>
 
 #include <arith.hpp>
 #include <backend.hpp>
@@ -21,32 +21,19 @@
 
 using af::dim4;
 using common::half;
-using namespace detail;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::unaryOp;
+using detail::ushort;
 
 template<typename T>
 static inline af_array tile(const af_array in, const af::dim4 &tileDims) {
-    const Array<T> inArray = getArray<T>(in);
-    const dim4 inDims      = inArray.dims();
-
-    // FIXME: Always use JIT instead of checking for the condition.
-    // The current limitation exists for performance reasons. it should change
-    // in the future.
-
-    bool take_jit_path = true;
-    dim4 outDims(1, 1, 1, 1);
-
-    // Check if JIT path can be taken. JIT path can only be taken if tiling a
-    // singleton dimension.
-    for (int i = 0; i < 4; i++) {
-        take_jit_path &= (inDims[i] == 1 || tileDims[i] == 1);
-        outDims[i] = inDims[i] * tileDims[i];
-    }
-
-    if (take_jit_path) {
-        return getHandle(unaryOp<T, af_noop_t>(inArray, outDims));
-    } else {
-        return getHandle(tile<T>(inArray, tileDims));
-    }
+    return getHandle(common::tile<T>(getArray<T>(in), tileDims));
 }
 
 af_err af_tile(af_array *out, const af_array in, const af::dim4 &tileDims) {

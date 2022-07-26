@@ -11,12 +11,14 @@
 #include <common/err_common.hpp>
 #include <handle.hpp>
 #include <regions.hpp>
+#include <types.hpp>
 #include <af/defines.h>
 #include <af/dim4.hpp>
 #include <af/image.h>
 
 using af::dim4;
-using namespace detail;
+using detail::uint;
+using detail::ushort;
 
 template<typename T>
 static af_array regions(af_array const &in, af_connectivity connectivity) {
@@ -33,7 +35,7 @@ af_err af_regions(af_array *out, const af_array in,
         af::dim4 dims         = info.dims();
 
         dim_t in_ndims = dims.ndims();
-        DIM_ASSERT(1, (in_ndims <= 3 && in_ndims >= 2));
+        DIM_ASSERT(1, (in_ndims == 2));
 
         af_dtype in_type = info.getType();
         if (in_type != b8) { TYPE_ERROR(1, in_type); }

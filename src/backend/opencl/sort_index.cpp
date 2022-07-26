@@ -8,6 +8,7 @@
  ********************************************************/
 
 #include <Array.hpp>
+#include <common/half.hpp>
 #include <copy.hpp>
 #include <err_opencl.hpp>
 #include <kernel/sort_by_key.hpp>
@@ -16,6 +17,8 @@
 #include <reorder.hpp>
 #include <sort_index.hpp>
 #include <stdexcept>
+
+using common::half;
 
 namespace opencl {
 template<typename T>
@@ -42,7 +45,7 @@ void sort_index(Array<T> &okey, Array<uint> &oval, const Array<T> &in,
             af::dim4 reorderDims(0, 1, 2, 3);
             reorderDims[dim] = 0;
             preorderDims[0]  = okey.dims()[dim];
-            for (int i = 1; i <= (int)dim; i++) {
+            for (uint i = 1; i <= dim; i++) {
                 reorderDims[i - 1] = i;
                 preorderDims[i]    = okey.dims()[i - 1];
             }
@@ -53,7 +56,7 @@ void sort_index(Array<T> &okey, Array<uint> &oval, const Array<T> &in,
             okey = reorder<T>(okey, reorderDims);
             oval = reorder<uint>(oval, reorderDims);
         }
-    } catch (std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
+    } catch (const std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
 }
 
 #define INSTANTIATE(T)                                              \
@@ -71,5 +74,6 @@ INSTANTIATE(short)
 INSTANTIATE(ushort)
 INSTANTIATE(intl)
 INSTANTIATE(uintl)
+INSTANTIATE(half)
 
 }  // namespace opencl

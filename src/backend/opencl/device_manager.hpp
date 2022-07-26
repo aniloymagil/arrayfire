@@ -10,21 +10,75 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
-#include <common/MemoryManager.hpp>
-#include <platform.hpp>
+#ifndef AF_OPENCL_MEM_DEBUG
+#define AF_OPENCL_MEM_DEBUG 0
+#endif
 
-// Forward declaration from clFFT.h
+// Forward declarations
 struct clfftSetupData_;
+
+namespace cl {
+class CommandQueue;
+class Context;
+class Device;
+}  // namespace cl
+
+namespace boost {
+template<typename T>
+class shared_ptr;
+
+namespace compute {
+class program_cache;
+}
+}  // namespace boost
+
+namespace spdlog {
+class logger;
+}
+
+namespace graphics {
+class ForgeManager;
+}
+
+namespace common {
+namespace memory {
+class MemoryManagerBase;
+}
+}  // namespace common
+
+using common::memory::MemoryManagerBase;
 
 namespace opencl {
 
-class DeviceManager {
-    friend MemoryManager& memoryManager();
+// opencl namespace forward declarations
+class GraphicsResourceManager;
+struct kc_entry_t;  // kernel cache entry
+class PlanCache;    // clfft
 
-    friend MemoryManagerPinned& pinnedMemoryManager();
+class DeviceManager {
+    friend MemoryManagerBase& memoryManager();
+
+    friend void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManager();
+
+    void resetMemoryManager();
+
+    friend MemoryManagerBase& pinnedMemoryManager();
+
+    friend void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManagerPinned();
+
+    void resetMemoryManagerPinned();
 
     friend graphics::ForgeManager& forgeManager();
 
@@ -39,9 +93,9 @@ class DeviceManager {
 
     friend kc_entry_t kernelCache(int device, const std::string& key);
 
-    friend std::string getDeviceInfo();
+    friend std::string getDeviceInfo() noexcept;
 
-    friend int getDeviceCount();
+    friend int getDeviceCount() noexcept;
 
     friend int getDeviceIdFromNativeId(cl_device_id id);
 
@@ -55,19 +109,19 @@ class DeviceManager {
 
     friend bool isGLSharingSupported();
 
-    friend bool isDoubleSupported(int device);
+    friend bool isDoubleSupported(unsigned device);
 
-    friend bool isHalfSupported(int device);
+    friend bool isHalfSupported(unsigned device);
 
     friend void devprop(char* d_name, char* d_platform, char* d_toolkit,
                         char* d_compute);
 
     friend int setDevice(int device);
 
-    friend void addDeviceContext(cl_device_id dev, cl_context cxt,
+    friend void addDeviceContext(cl_device_id dev, cl_context ctx,
                                  cl_command_queue que);
 
-    friend void setDeviceContext(cl_device_id dev, cl_context cxt);
+    friend void setDeviceContext(cl_device_id dev, cl_context ctx);
 
     friend void removeDeviceContext(cl_device_id dev, cl_context ctx);
 
@@ -76,11 +130,13 @@ class DeviceManager {
     friend int getActivePlatform();
 
    public:
-    static const unsigned MAX_DEVICES = 32;
+    static const int MAX_DEVICES = 32;
 
     static DeviceManager& getInstance();
 
     ~DeviceManager();
+
+    spdlog::logger* getLogger();
 
    protected:
     using clfftSetupData = clfftSetupData_;
@@ -97,20 +153,22 @@ class DeviceManager {
 
    private:
     // Attributes
-    common::mutex_t deviceMutex;
-    std::vector<cl::Device*> mDevices;
-    std::vector<cl::Context*> mContexts;
-    std::vector<cl::CommandQueue*> mQueues;
+    std::shared_ptr<spdlog::logger> logger;
+    std::mutex deviceMutex;
+    std::vector<std::unique_ptr<cl::Device>> mDevices;
+    std::vector<std::unique_ptr<cl::Context>> mContexts;
+    std::vector<std::unique_ptr<cl::CommandQueue>> mQueues;
     std::vector<bool> mIsGLSharingOn;
     std::vector<int> mDeviceTypes;
     std::vector<int> mPlatforms;
     unsigned mUserDeviceOffset;
 
     std::unique_ptr<graphics::ForgeManager> fgMngr;
-    std::unique_ptr<MemoryManager> memManager;
-    std::unique_ptr<MemoryManagerPinned> pinnedMemManager;
+    std::unique_ptr<MemoryManagerBase> memManager;
+    std::unique_ptr<MemoryManagerBase> pinnedMemManager;
     std::unique_ptr<GraphicsResourceManager> gfxManagers[MAX_DEVICES];
     std::unique_ptr<clfftSetupData> mFFTSetup;
+    std::mutex mutex;
 
     using BoostProgCache = boost::shared_ptr<boost::compute::program_cache>;
     std::vector<BoostProgCache*> mBoostProgCacheVector;

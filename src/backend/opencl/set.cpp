@@ -14,14 +14,13 @@
 #include <sort.hpp>
 #include <af/dim4.hpp>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
+AF_DEPRECATED_WARNINGS_OFF
 #include <boost/compute/algorithm/set_intersection.hpp>
 #include <boost/compute/algorithm/set_union.hpp>
 #include <boost/compute/algorithm/sort.hpp>
 #include <boost/compute/algorithm/unique.hpp>
 #include <boost/compute/iterator/buffer_iterator.hpp>
+AF_DEPRECATED_WARNINGS_ON
 
 namespace compute = boost::compute;
 
@@ -56,7 +55,7 @@ Array<T> setUnique(const Array<T> &in, const bool is_sorted) {
         out.resetDims(dim4(std::distance(begin, end), 1, 1, 1));
 
         return out;
-    } catch (std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
+    } catch (const std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
 }
 
 template<typename T>
@@ -94,7 +93,7 @@ Array<T> setUnion(const Array<T> &first, const Array<T> &second,
         out.resetDims(dim4(std::distance(out_begin, out_end), 1, 1, 1));
         return out;
 
-    } catch (std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
+    } catch (const std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
 }
 
 template<typename T>
@@ -132,7 +131,7 @@ Array<T> setIntersect(const Array<T> &first, const Array<T> &second,
 
         out.resetDims(dim4(std::distance(out_begin, out_end), 1, 1, 1));
         return out;
-    } catch (std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
+    } catch (const std::exception &ex) { AF_ERROR(ex.what(), AF_ERR_INTERNAL); }
 }
 
 #define INSTANTIATE(T)                                                        \
@@ -153,5 +152,3 @@ INSTANTIATE(ushort)
 INSTANTIATE(intl)
 INSTANTIATE(uintl)
 }  // namespace opencl
-
-#pragma GCC diagnostic pop

@@ -10,17 +10,15 @@
 #include <Param.hpp>
 #include <backend.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
 #include <err_cuda.hpp>
 #include <memory.hpp>
-#include <nvrtc/cache.hpp>
 #include <nvrtc_kernel_headers/scan_first_cuh.hpp>
 #include "config.hpp"
 
 namespace cuda {
 namespace kernel {
-
-static const std::string ScanFirstSource(scan_first_cuh, scan_first_cuh_len);
 
 template<typename Ti, typename To, af_op_t op>
 static void scan_first_launcher(Param<To> out, Param<To> tmp, CParam<Ti> in,
@@ -28,11 +26,11 @@ static void scan_first_launcher(Param<To> out, Param<To> tmp, CParam<Ti> in,
                                 const uint threads_x, bool isFinalPass,
                                 bool inclusive_scan) {
     auto scan_first =
-        getKernel("cuda::scan_first", ScanFirstSource,
-                  {TemplateTypename<Ti>(), TemplateTypename<To>(),
-                   TemplateArg(op), TemplateArg(isFinalPass),
-                   TemplateArg(threads_x), TemplateArg(inclusive_scan)},
-                  {DefineValue(THREADS_PER_BLOCK)});
+        common::getKernel("cuda::scan_first", {scan_first_cuh_src},
+                          {TemplateTypename<Ti>(), TemplateTypename<To>(),
+                           TemplateArg(op), TemplateArg(isFinalPass),
+                           TemplateArg(threads_x), TemplateArg(inclusive_scan)},
+                          {DefineValue(THREADS_PER_BLOCK)});
 
     dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
     dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
@@ -53,8 +51,9 @@ template<typename To, af_op_t op>
 static void bcast_first_launcher(Param<To> out, CParam<To> tmp,
                                  const uint blocks_x, const uint blocks_y,
                                  const uint threads_x, bool inclusive_scan) {
-    auto scan_first_bcast = getKernel("cuda::scan_first_bcast", ScanFirstSource,
-                                {TemplateTypename<To>(), TemplateArg(op)});
+    auto scan_first_bcast =
+        common::getKernel("cuda::scan_first_bcast", {scan_first_cuh_src},
+                          {TemplateTypename<To>(), TemplateArg(op)});
 
     dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
     dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);

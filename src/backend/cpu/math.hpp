@@ -10,6 +10,7 @@
 #pragma once
 
 #include <common/defines.hpp>
+#include <common/half.hpp>
 #include <types.hpp>
 #include <af/defines.h>
 
@@ -64,7 +65,7 @@ STATIC_ T maxval() {
 }
 template<typename T>
 STATIC_ T minval() {
-    return std::numeric_limits<T>::min();
+    return std::numeric_limits<T>::lowest();
 }
 template<>
 STATIC_ float maxval() {
@@ -75,12 +76,20 @@ STATIC_ double maxval() {
     return std::numeric_limits<double>::infinity();
 }
 template<>
+STATIC_ common::half maxval() {
+    return std::numeric_limits<common::half>::infinity();
+}
+template<>
 STATIC_ float minval() {
     return -std::numeric_limits<float>::infinity();
 }
 template<>
 STATIC_ double minval() {
     return -std::numeric_limits<double>::infinity();
+}
+template<>
+STATIC_ common::half minval() {
+    return -std::numeric_limits<common::half>::infinity();
 }
 
 template<typename T>
@@ -104,4 +113,10 @@ static inline T clamp(const T value, const T lo, const T hi) {
     return (value < lo ? lo : (value > hi ? hi : value));
 }
 #endif
+
+inline double real(cdouble in) noexcept { return std::real(in); }
+inline float real(cfloat in) noexcept { return std::real(in); }
+inline double imag(cdouble in) noexcept { return std::imag(in); }
+inline float imag(cfloat in) noexcept { return std::imag(in); }
+
 }  // namespace cpu

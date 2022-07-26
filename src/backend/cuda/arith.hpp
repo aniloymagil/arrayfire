@@ -7,15 +7,23 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
+
 #include <Array.hpp>
-#include <binary.hpp>
-#include <optypes.hpp>
+#include <common/jit/BinaryNode.hpp>
 #include <af/dim4.hpp>
 
 namespace cuda {
+
+template<typename T, af_op_t op>
+Array<T> arithOp(const Array<T> &&lhs, const Array<T> &&rhs,
+                 const af::dim4 &odims) {
+    return common::createBinaryNode<T, T, op>(lhs, rhs, odims);
+}
+
 template<typename T, af_op_t op>
 Array<T> arithOp(const Array<T> &lhs, const Array<T> &rhs,
                  const af::dim4 &odims) {
-    return createBinaryNode<T, T, op>(lhs, rhs, odims);
+    return common::createBinaryNode<T, T, op>(lhs, rhs, odims);
 }
 }  // namespace cuda

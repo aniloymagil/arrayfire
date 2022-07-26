@@ -15,8 +15,13 @@
 #include <af/defines.h>
 #include <complex>
 
-using af::dim4;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 template<typename T>
 static inline af_array setUnique(const af_array in, const bool is_sorted) {
@@ -117,7 +122,7 @@ af_err af_set_intersect(af_array* out, const af_array first,
         const ArrayInfo& first_info  = getInfo(first);
         const ArrayInfo& second_info = getInfo(second);
 
-        // TODO: fix for set intersect from union
+        // TODO(umar): fix for set intersect from union
         if (first_info.isEmpty()) { return af_retain_array(out, first); }
 
         if (second_info.isEmpty()) { return af_retain_array(out, second); }

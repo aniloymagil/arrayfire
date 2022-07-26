@@ -151,8 +151,8 @@ inline void threefry(uint k[2], uint c[2], uint X[2]) {
     X[1] += 4;
 }
 
-__kernel void generate(__global T *output, unsigned elements, unsigned hic,
-                       unsigned loc, unsigned hi, unsigned lo) {
+kernel void threefryGenerator(global T *output, unsigned elements, unsigned hic,
+                              unsigned loc, unsigned hi, unsigned lo) {
     unsigned gid   = get_group_id(0);
     unsigned off   = get_local_size(0);
     unsigned index = gid * ELEMENTS_PER_BLOCK + get_local_id(0);
@@ -171,8 +171,8 @@ __kernel void generate(__global T *output, unsigned elements, unsigned hic,
     threefry(key, ctr, o + 2);
 
     if (gid != get_num_groups(0) - 1) {
-        WRITE(output, &index, &o[0], &o[1], &o[2], &o[3]);
+        WRITE(output, index, o[0], o[1], o[2], o[3]);
     } else {
-        PARTIAL_WRITE(output, &index, &o[0], &o[1], &o[2], &o[3], &elements);
+        PARTIAL_WRITE(output, index, o[0], o[1], o[2], o[3], elements);
     }
 }

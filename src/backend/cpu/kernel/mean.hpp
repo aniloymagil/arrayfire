@@ -9,20 +9,22 @@
 
 #pragma once
 #include <Array.hpp>
-#include <ops.hpp>
+#include <common/Transform.hpp>
 
 namespace cpu {
 namespace kernel {
 
 template<typename Ti, typename To, typename Tw>
 struct MeanOp {
-    Transform<Ti, To, af_add_t> transform;
+    common::Transform<Ti, To, af_add_t> transform;
     To runningMean;
     Tw runningCount;
     MeanOp(Ti mean, Tw count)
         : transform(), runningMean(transform(mean)), runningCount(count) {}
 
-    void operator()(Ti _newMean, Tw newCount) {
+    /// Prevents the optimzation of the mean calculation by some compiler flags
+    /// specifically -march=native.
+    [[gnu::optimize("01")]] void operator()(Ti _newMean, Tw newCount) {
         To newMean = transform(_newMean);
         if ((newCount != 0) || (runningCount != 0)) {
             Tw runningScale = runningCount;
@@ -71,9 +73,10 @@ struct mean_weighted_dim<T, Tw, 0> {
 
         dim_t istride = istrides[dim];
         dim_t wstride = wstrides[dim];
-        MeanOp<T, T, Tw> Op(0, 0);
+        MeanOp<compute_t<T>, compute_t<T>, compute_t<Tw>> Op(0, 0);
         for (dim_t i = 0; i < idims[dim]; i++) {
-            Op(in[inOffset + i * istride], wt[wtOffset + i * wstride]);
+            Op(compute_t<T>(in[inOffset + i * istride]),
+               compute_t<Tw>(wt[wtOffset + i * wstride]));
         }
 
         out[outOffset] = Op.runningMean;
@@ -108,9 +111,10 @@ struct mean_dim<Ti, Tw, To, 0> {
         To* out            = output.get();
 
         dim_t istride = istrides[dim];
-        MeanOp<Ti, To, Tw> Op(0, 0);
-        for (dim_t i = 0; i < idims[dim]; i++) {
-            Op(in[inOffset + i * istride], 1);
+        dim_t end     = inOffset + idims[dim] * istride;
+        MeanOp<compute_t<Ti>, compute_t<To>, compute_t<Tw>> Op(0, 0);
+        for (dim_t i = inOffset; i < end; i += istride) {
+            Op(compute_t<Ti>(in[i]), 1);
         }
 
         out[outOffset] = Op.runningMean;

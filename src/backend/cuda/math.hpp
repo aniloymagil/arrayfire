@@ -27,9 +27,9 @@
 #endif  //__CUDACC_RTC__
 
 #include <backend.hpp>
+#include <common/half.hpp>
 #include <types.hpp>
 #include <af/defines.h>
-#include <common/half.hpp>
 
 #include <cuda_fp16.h>
 #include <math_constants.h>
@@ -38,7 +38,7 @@ namespace cuda {
 
 template<typename T>
 static inline __DH__ T abs(T val) {
-    return abs(val);
+    return ::abs(val);
 }
 static inline __DH__ int abs(int val) { return (val > 0 ? val : -val); }
 static inline __DH__ char abs(char val) { return (val > 0 ? val : -val); }
@@ -74,7 +74,7 @@ inline __DH__ __half min<__half>(__half lhs, __half rhs) {
 #if __CUDA_ARCH__ >= 530
     return __hlt(lhs, rhs) ? lhs : rhs;
 #else
-    return (float)lhs < (float)rhs ? lhs : rhs;
+    return __half2float(lhs) < __half2float(rhs) ? lhs : rhs;
 #endif
 }
 
@@ -83,7 +83,7 @@ inline __DH__ __half max<__half>(__half lhs, __half rhs) {
 #if __CUDA_ARCH__ >= 530
     return __hgt(lhs, rhs) ? lhs : rhs;
 #else
-    return (float)lhs > (float)rhs ? lhs : rhs;
+    return __half2float(lhs) > __half2float(rhs) ? lhs : rhs;
 #endif
 }
 
@@ -168,85 +168,85 @@ STATIC_ double minval() {
 }
 #else
 template<typename T>
-__device__ T maxval() {
+STATIC_ __device__ T maxval() {
     return 1u << (8 * sizeof(T) - 1);
 }
 template<typename T>
-__device__ T minval() {
+STATIC_ __device__ T minval() {
     return scalar<T>(0);
 }
 
 template<>
-__device__ int maxval<int>() {
+STATIC_ __device__ int maxval<int>() {
     return 0x7fffffff;
 }
 template<>
-__device__ int minval<int>() {
+STATIC_ __device__ int minval<int>() {
     return 0x80000000;
 }
 template<>
-__device__ intl maxval<intl>() {
+STATIC_ __device__ intl maxval<intl>() {
     return 0x7fffffffffffffff;
 }
 template<>
-__device__ intl minval<intl>() {
+STATIC_ __device__ intl minval<intl>() {
     return 0x8000000000000000;
 }
 template<>
-__device__ uintl maxval<uintl>() {
+STATIC_ __device__ uintl maxval<uintl>() {
     return 1ULL << (8 * sizeof(uintl) - 1);
 }
 template<>
-__device__ char maxval<char>() {
+STATIC_ __device__ char maxval<char>() {
     return 0x7f;
 }
 template<>
-__device__ char minval<char>() {
+STATIC_ __device__ char minval<char>() {
     return 0x80;
 }
 template<>
-__device__ float maxval<float>() {
+STATIC_ __device__ float maxval<float>() {
     return CUDART_INF_F;
 }
 template<>
-__device__ float minval<float>() {
+STATIC_ __device__ float minval<float>() {
     return -CUDART_INF_F;
 }
 template<>
-__device__ double maxval<double>() {
+STATIC_ __device__ double maxval<double>() {
     return CUDART_INF;
 }
 template<>
-__device__ double minval<double>() {
+STATIC_ __device__ double minval<double>() {
     return -CUDART_INF;
 }
 template<>
-__device__ short maxval<short>() {
+STATIC_ __device__ short maxval<short>() {
     return 0x7fff;
 }
 template<>
-__device__ short minval<short>() {
+STATIC_ __device__ short minval<short>() {
     return 0x8000;
 }
 template<>
-__device__ ushort maxval<ushort>() {
+STATIC_ __device__ ushort maxval<ushort>() {
     return ((ushort)1) << (8 * sizeof(ushort) - 1);
 }
 template<>
-__device__ common::half maxval<common::half>() {
+STATIC_ __device__ common::half maxval<common::half>() {
     return common::half(65537.f);
 }
 template<>
-__device__ common::half minval<common::half>() {
+STATIC_ __device__ common::half minval<common::half>() {
     return common::half(-65537.f);
 }
 template<>
-__device__ __half maxval<__half>() {
-    return __float2half(65537.f);
+STATIC_ __device__ __half maxval<__half>() {
+    return __float2half(CUDART_INF);
 }
 template<>
-__device__ __half minval<__half>() {
-    return __float2half(-65537.f);
+STATIC_ __device__ __half minval<__half>() {
+    return __float2half(-CUDART_INF);
 }
 #endif
 
@@ -369,15 +369,6 @@ BINOP_SCALAR(cdouble, double, cdouble)
 
 #undef BINOP_SCALAR
 
-__SDH__ bool operator==(cfloat a, cfloat b) {
-    return (a.x == b.x) && (a.y == b.y);
-}
-__SDH__ bool operator!=(cfloat a, cfloat b) { return !(a == b); }
-__SDH__ bool operator==(cdouble a, cdouble b) {
-    return (a.x == b.x) && (a.y == b.y);
-}
-__SDH__ bool operator!=(cdouble a, cdouble b) { return !(a == b); }
-
 template<typename T>
 static inline T division(T lhs, double rhs) {
     return lhs / rhs;
@@ -403,3 +394,12 @@ static inline __DH__ T clamp(const T value, const T lo, const T hi) {
 }
 
 }  // namespace cuda
+
+__SDH__ bool operator==(cuda::cfloat a, cuda::cfloat b) {
+    return (a.x == b.x) && (a.y == b.y);
+}
+__SDH__ bool operator!=(cuda::cfloat a, cuda::cfloat b) { return !(a == b); }
+__SDH__ bool operator==(cuda::cdouble a, cuda::cdouble b) {
+    return (a.x == b.x) && (a.y == b.y);
+}
+__SDH__ bool operator!=(cuda::cdouble a, cuda::cdouble b) { return !(a == b); }

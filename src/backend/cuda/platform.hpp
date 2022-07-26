@@ -12,6 +12,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -27,8 +28,11 @@ struct cusparseContext;
 typedef struct cusparseContext* SparseHandle;
 struct cusolverDnContext;
 typedef struct cusolverDnContext* SolveHandle;
+
+#ifdef WITH_CUDNN
 struct cudnnContext;
 typedef struct cudnnContext* cudnnHandle_t;
+#endif
 
 namespace spdlog {
 class logger;
@@ -38,24 +42,31 @@ namespace graphics {
 class ForgeManager;
 }
 
+namespace common {
+namespace memory {
+class MemoryManagerBase;
+}
+}  // namespace common
+
+using common::memory::MemoryManagerBase;
+
 namespace cuda {
 
 class GraphicsResourceManager;
-class MemoryManager;
-class MemoryManagerPinned;
 class PlanCache;
 
 int getBackend();
 
-std::string getDeviceInfo();
-std::string getDeviceInfo(int device);
+std::string getDeviceInfo() noexcept;
+std::string getDeviceInfo(int device) noexcept;
 
-std::string getPlatformInfo();
+std::string getPlatformInfo() noexcept;
 
-std::string int_version_to_string(int version);
-std::string getDriverVersion();
+std::string getDriverVersion() noexcept;
 
-std::string getCUDARuntimeVersion();
+// Returns the cuda runtime version as a string for the current build. If no
+// runtime is found or an error occured, the string "N/A" is returned
+std::string getCUDARuntimeVersion() noexcept;
 
 // Returns true if double is supported by the device
 bool isDoubleSupported(int device);
@@ -65,11 +76,13 @@ bool isHalfSupported(int device);
 
 void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute);
 
-unsigned getMaxJitSize();
+int& getMaxJitSize();
 
 int getDeviceCount();
 
-int getActiveDeviceId();
+void init();
+
+unsigned getActiveDeviceId();
 
 int getDeviceNativeId(int device);
 
@@ -92,21 +105,31 @@ cudaDeviceProp getDeviceProp(int device);
 
 std::pair<int, int> getComputeCapability(const int device);
 
-bool &evalFlag();
+bool& evalFlag();
 
-MemoryManager& memoryManager();
+MemoryManagerBase& memoryManager();
 
-MemoryManagerPinned &pinnedMemoryManager();
+MemoryManagerBase& pinnedMemoryManager();
 
-graphics::ForgeManager &forgeManager();
+void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
 
-GraphicsResourceManager &interopManager();
+void resetMemoryManager();
 
-PlanCache &fftManager();
+void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManagerPinned();
+
+graphics::ForgeManager& forgeManager();
+
+GraphicsResourceManager& interopManager();
+
+PlanCache& fftManager();
 
 BlasHandle blasHandle();
 
+#ifdef WITH_CUDNN
 cudnnHandle_t nnHandle();
+#endif
 
 SolveHandle solverDnHandle();
 

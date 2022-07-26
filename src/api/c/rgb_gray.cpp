@@ -15,15 +15,24 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
 #include <common/ArrayInfo.hpp>
+#include <common/cast.hpp>
+#include <common/tile.hpp>
 #include <handle.hpp>
 #include <join.hpp>
 #include <math.hpp>
-#include <tile.hpp>
 
 using af::dim4;
-using namespace detail;
+using common::cast;
+using detail::arithOp;
+using detail::Array;
+using detail::createEmptyArray;
+using detail::createValueArray;
+using detail::join;
+using detail::scalar;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
 
 template<typename T, typename cType>
 static af_array rgb2gray(const af_array& in, const float r, const float g,
@@ -66,7 +75,7 @@ static af_array gray2rgb(const af_array& in, const float r, const float g,
                          const float b) {
     if (r == 1.0 && g == 1.0 && b == 1.0) {
         dim4 tileDims(1, 1, 3, 1);
-        return getHandle(tile(getArray<T>(in), tileDims));
+        return getHandle(common::tile(getArray<T>(in), tileDims));
     }
 
     af_array mod_input = 0;
@@ -88,8 +97,10 @@ static af_array gray2rgb(const af_array& in, const float r, const float g,
     AF_CHECK(af_release_array(mod_input));
 
     // join channels
-    Array<cType> expr4 = join<cType, cType>(2, expr1, expr2);
-    return getHandle(join<cType, cType>(2, expr3, expr4));
+    dim4 odims(expr1.dims()[0], expr1.dims()[1], 3);
+    Array<cType> out = createEmptyArray<cType>(odims);
+    join<cType>(out, 2, {expr3, expr1, expr2});
+    return getHandle(out);
 }
 
 template<typename T, typename cType, bool isRGB2GRAY>
@@ -117,10 +128,11 @@ af_err convert(af_array* out, const af_array in, const float r, const float g,
 
         // If RGB is input, then assert 3 channels
         // else 1 channel
-        if (isRGB2GRAY)
+        if (isRGB2GRAY) {
             ARG_ASSERT(1, (inputDims[2] == 3));
-        else
+        } else {
             ARG_ASSERT(1, (inputDims[2] == 1));
+        }
 
         af_array output = 0;
         switch (iType) {

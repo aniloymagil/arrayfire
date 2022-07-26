@@ -12,6 +12,7 @@
 #include <common/err_common.hpp>
 #include <common/module_loading.hpp>
 #include <common/util.hpp>
+#include <af/backend.h>
 #include <af/defines.h>
 
 #include <spdlog/spdlog.h>
@@ -42,46 +43,20 @@ static inline int backend_index(af::Backend be) {
 
 class AFSymbolManager {
    public:
-    static AFSymbolManager& getInstance();
+    static AFSymbolManager& getInstance() {
+        static AFSymbolManager* symbolManager = new AFSymbolManager();
+        return *symbolManager;
+    }
 
     ~AFSymbolManager();
 
-    unsigned getBackendCount();
+    unsigned getBackendCount() const;
+    int getAvailableBackends() const;
+    af::Backend getDefaultBackend() { return defaultBackend; }
+    LibHandle getDefaultHandle() { return defaultHandle; }
 
-    int getAvailableBackends();
-
-    af_err setBackend(af::Backend bnkd);
-
-    af::Backend getActiveBackend() { return activeBackend; }
-
-    template<typename... CalleeArgs>
-    af_err call(const char* symbolName, CalleeArgs... args) {
-        typedef af_err (*af_func)(CalleeArgs...);
-        if (!activeHandle) { UNIFIED_ERROR_LOAD_LIB(); }
-        thread_local std::array<std::unordered_map<const char*, af_func>,
-                                NUM_BACKENDS>
-            funcHandles;
-
-        int index           = backend_index(getActiveBackend());
-        af_func& funcHandle = funcHandles[index][symbolName];
-
-        if (!funcHandle) {
-            AF_TRACE("Loading: {}", symbolName);
-            funcHandle =
-                (af_func)common::getFunctionPointer(activeHandle, symbolName);
-        }
-        if (!funcHandle) {
-            AF_TRACE("Failed to load symbol: {}", symbolName);
-            std::string str = "Failed to load symbol: ";
-            str += symbolName;
-            AF_RETURN_ERROR(str.c_str(), AF_ERR_LOAD_SYM);
-        }
-
-        return funcHandle(args...);
-    }
-
-    LibHandle getHandle() { return activeHandle; }
     spdlog::logger* getLogger();
+    LibHandle getHandle(int idx) { return bkndHandles[idx]; }
 
    protected:
     AFSymbolManager();
@@ -94,21 +69,52 @@ class AFSymbolManager {
     void operator=(AFSymbolManager const&);
 
    private:
-    LibHandle bkndHandles[NUM_BACKENDS];
+    LibHandle bkndHandles[NUM_BACKENDS]{};
 
-    LibHandle activeHandle;
     LibHandle defaultHandle;
     unsigned numBackends;
     int backendsAvailable;
-    af_backend activeBackend;
     af_backend defaultBackend;
     std::shared_ptr<spdlog::logger> logger;
 };
 
-// Helper functions to ensure all the input arrays are on the active backend
-bool checkArray(af_backend activeBackend, const af_array a);
-bool checkArray(af_backend activeBackend, const af_array *a);
-bool checkArrays(af_backend activeBackend);
+af_err setBackend(af::Backend bknd);
+
+af::Backend& getActiveBackend();
+
+LibHandle& getActiveHandle();
+
+namespace {
+bool checkArray(af_backend activeBackend, const af_array a) {
+    // Convert af_array into int to retrieve the backend info.
+    // See ArrayInfo.hpp for more
+    af_backend backend = (af_backend)0;
+
+    // This condition is required so that the invalid args tests for unified
+    // backend return the expected error rather than AF_ERR_ARR_BKND_MISMATCH
+    // Since a = 0, does not have a backend specified, it should be a
+    // AF_ERR_ARG instead of AF_ERR_ARR_BKND_MISMATCH
+    if (a == 0) return true;
+
+    af_get_backend_id(&backend, a);
+    return backend == activeBackend;
+}
+
+[[gnu::unused]] bool checkArray(af_backend activeBackend, const af_array* a) {
+    if (a) {
+        return checkArray(activeBackend, *a);
+    } else {
+        return true;
+    }
+}
+
+[[gnu::unused]] bool checkArrays(af_backend activeBackend) {
+    UNUSED(activeBackend);
+    // Dummy
+    return true;
+}
+
+}  // namespace
 
 template<typename T, typename... Args>
 bool checkArrays(af_backend activeBackend, T a, Args... arg) {
@@ -126,24 +132,35 @@ bool checkArrays(af_backend activeBackend, T a, Args... arg) {
 /// \param[in] Any number of af_arrays or pointer to af_arrays
 #define CHECK_ARRAYS(...)                                                     \
     do {                                                                      \
-        af_backend backendId =                                                \
-            unified::AFSymbolManager::getInstance().getActiveBackend();       \
+        af_backend backendId = unified::getActiveBackend();                   \
         if (!unified::checkArrays(backendId, __VA_ARGS__))                    \
             AF_RETURN_ERROR("Input array does not belong to current backend", \
                             AF_ERR_ARR_BKND_MISMATCH);                        \
     } while (0)
 
-#if defined(OS_WIN)
-#define CALL(...) \
-    unified::AFSymbolManager::getInstance().call(__FUNCTION__, __VA_ARGS__)
-#define CALL_NO_PARAMS() \
-    unified::AFSymbolManager::getInstance().call(__FUNCTION__)
-#else
-#define CALL(...) \
-    unified::AFSymbolManager::getInstance().call(__func__, __VA_ARGS__)
-#define CALL_NO_PARAMS() unified::AFSymbolManager::getInstance().call(__func__)
-#endif
+#define CALL(FUNCTION, ...)                                                      \
+    using af_func                  = std::add_pointer<decltype(FUNCTION)>::type; \
+    thread_local af_backend index_ = unified::getActiveBackend();                \
+    if (unified::getActiveHandle()) {                                            \
+        thread_local af_func func = (af_func)common::getFunctionPointer(         \
+            unified::getActiveHandle(), __func__);                               \
+        if (!func) {                                                             \
+            AF_RETURN_ERROR(                                                     \
+                "requested symbol name could not be found in loaded library.",   \
+                AF_ERR_LOAD_LIB);                                                \
+        }                                                                        \
+        if (index_ != unified::getActiveBackend()) {                             \
+            index_ = unified::getActiveBackend();                                \
+            func   = (af_func)common::getFunctionPointer(                        \
+                unified::getActiveHandle(), __func__);                         \
+        }                                                                        \
+        return func(__VA_ARGS__);                                                \
+    } else {                                                                     \
+        AF_RETURN_ERROR("ArrayFire couldn't locate any backends.",               \
+                        AF_ERR_LOAD_LIB);                                        \
+    }
 
-#define LOAD_SYMBOL()           \
-    common::getFunctionPointer( \
-        unified::AFSymbolManager::getInstance().getHandle(), __FUNCTION__)
+#define CALL_NO_PARAMS(FUNCTION) CALL(FUNCTION)
+
+#define LOAD_SYMBOL() \
+    common::getFunctionPointer(unified::getActiveHandle(), __FUNCTION__)

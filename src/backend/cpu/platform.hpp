@@ -16,13 +16,19 @@ namespace graphics {
 class ForgeManager;
 }
 
-namespace cpu {
+namespace common {
+namespace memory {
+class MemoryManagerBase;
+}
+}  // namespace common
 
-class MemoryManager;
+using common::memory::MemoryManagerBase;
+
+namespace cpu {
 
 int getBackend();
 
-std::string getDeviceInfo();
+std::string getDeviceInfo() noexcept;
 
 bool isDoubleSupported(int device);
 
@@ -30,11 +36,13 @@ bool isHalfSupported(int device);
 
 void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute);
 
-unsigned getMaxJitSize();
+int& getMaxJitSize();
 
 int getDeviceCount();
 
-int getActiveDeviceId();
+void init();
+
+unsigned getActiveDeviceId();
 
 size_t getDeviceMemorySize(int device);
 
@@ -48,7 +56,16 @@ void sync(int device);
 
 bool& evalFlag();
 
-MemoryManager& memoryManager();
+MemoryManagerBase& memoryManager();
+
+void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManager();
+
+// Pinned memory not supported
+void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+void resetMemoryManagerPinned();
 
 graphics::ForgeManager& forgeManager();
 

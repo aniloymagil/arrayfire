@@ -7,76 +7,61 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <cache.hpp>
+#pragma once
+
+#include <common/kernel_cache.hpp>
 #include <kernel/convolve/conv_common.hpp>
 
 namespace opencl {
-
 namespace kernel {
 
-template<typename T, typename aT, bool expand>
+template<typename T, typename aT>
 void conv2Helper(const conv_kparam_t& param, Param out, const Param signal,
-                 const Param filter) {
-    int f0 = filter.info.dims[0];
-    int f1 = filter.info.dims[1];
+                 const Param filter, const bool expand) {
+    using cl::EnqueueArgs;
+    using cl::NDRange;
+    using std::string;
+    using std::vector;
 
-    std::string ref_name =
-        std::string("conv2_") + std::string(dtype_traits<T>::getName()) +
-        std::string("_") + std::string(dtype_traits<aT>::getName()) +
-        std::string("_") + std::to_string(expand) + std::string("_") +
-        std::to_string(f0) + std::string("_") + std::to_string(f1);
+    constexpr bool IsComplex =
+        std::is_same<T, cfloat>::value || std::is_same<T, cdouble>::value;
 
-    int device = getActiveDeviceId();
+    const int f0 = filter.info.dims[0];
+    const int f1 = filter.info.dims[1];
+    const size_t LOC_SIZE =
+        (THREADS_X + 2 * (f0 - 1)) * (THREADS_Y + 2 * (f1 - 1));
 
-    kc_entry_t entry = kernelCache(device, ref_name);
+    vector<TemplateArg> tmpltArgs = {
+        TemplateTypename<T>(), TemplateTypename<aT>(), TemplateArg(expand),
+        TemplateArg(f0),       TemplateArg(f1),
+    };
+    vector<string> compileOpts = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+        DefineKeyValue(Ti, dtype_traits<T>::getName()),
+        DefineKeyValue(To, dtype_traits<aT>::getName()),
+        DefineKeyValue(accType, dtype_traits<aT>::getName()),
+        DefineKeyValue(RANK, 2),
+        DefineKeyValue(FLEN0, f0),
+        DefineKeyValue(FLEN1, f1),
+        DefineKeyValue(EXPAND, (expand ? 1 : 0)),
+        DefineKeyValue(C_SIZE, LOC_SIZE),
+        DefineKeyFromStr(binOpName<af_mul_t>()),
+        DefineKeyValue(CPLX, (IsComplex ? 1 : 0)),
+    };
+    compileOpts.emplace_back(getTypeBuildDefinition<T>());
 
-    if (entry.prog == 0 && entry.ker == 0) {
-        size_t LOC_SIZE =
-            (THREADS_X + 2 * (f0 - 1)) * (THREADS_Y + 2 * (f1 - 1));
+    auto convolve = common::getKernel("convolve", {ops_cl_src, convolve_cl_src},
+                                      tmpltArgs, compileOpts);
 
-        std::ostringstream options;
-        options << " -D T=" << dtype_traits<T>::getName()
-                << " -D Ti=" << dtype_traits<T>::getName()
-                << " -D To=" << dtype_traits<aT>::getName()
-                << " -D accType=" << dtype_traits<aT>::getName()
-                << " -D BASE_DIM="
-                << 2 /* hard constant specific to this convolution type */
-                << " -D FLEN0=" << f0 << " -D FLEN1=" << f1
-                << " -D EXPAND=" << expand << " -D C_SIZE=" << LOC_SIZE
-                << " -D " << binOpName<af_mul_t>();
-
-        if ((af_dtype)dtype_traits<T>::af_type == c32 ||
-            (af_dtype)dtype_traits<T>::af_type == c64) {
-            options << " -D CPLX=1";
-        } else {
-            options << " -D CPLX=0";
-        }
-        if (std::is_same<T, double>::value || std::is_same<T, cdouble>::value)
-            options << " -D USE_DOUBLE";
-
-        const char* ker_strs[] = {ops_cl, convolve_cl};
-        const int ker_lens[]   = {ops_cl_len, convolve_cl_len};
-        Program prog;
-        buildProgram(prog, 2, ker_strs, ker_lens, options.str());
-
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "convolve");
-
-        addKernelToCache(device, ref_name, entry);
-    }
-
-    auto convOp =
-        cl::KernelFunctor<Buffer, KParam, Buffer, KParam, Buffer, KParam, int,
-                          int, int, int, int, int>(*entry.ker);
-
-    convOp(EnqueueArgs(getQueue(), param.global, param.local), *out.data,
-           out.info, *signal.data, signal.info, *param.impulse, filter.info,
-           param.nBBS0, param.nBBS1, param.o[1], param.o[2], param.s[1],
-           param.s[2]);
+    convolve(EnqueueArgs(getQueue(), param.global, param.local), *out.data,
+             out.info, *signal.data, signal.info, *param.impulse, filter.info,
+             param.nBBS0, param.nBBS1, param.o[1], param.o[2], param.s[1],
+             param.s[2]);
 }
 
-template<typename T, typename aT, bool expand>
-void conv2(conv_kparam_t& p, Param& out, const Param& sig, const Param& filt) {
+template<typename T, typename aT>
+void conv2(conv_kparam_t& p, Param& out, const Param& sig, const Param& filt,
+           const bool expand) {
     size_t se_size = filt.info.dims[0] * filt.info.dims[1] * sizeof(aT);
     p.impulse      = bufferAlloc(se_size);
     int f0Off      = filt.info.offset;
@@ -98,17 +83,14 @@ void conv2(conv_kparam_t& p, Param& out, const Param& sig, const Param& filt) {
             p.s[1] = (p.inHasNoOffset ? 0 : b2);
             p.s[2] = (p.inHasNoOffset ? 0 : b3);
 
-            conv2Helper<T, aT, expand>(p, out, sig, filt);
+            conv2Helper<T, aT>(p, out, sig, filt, expand);
         }
     }
 }
 
-#define INSTANTIATE(T, accT)                                                 \
-    template void conv2<T, accT, true>(conv_kparam_t & p, Param & out,       \
-                                       const Param& sig, const Param& filt); \
-    template void conv2<T, accT, false>(conv_kparam_t & p, Param & out,      \
-                                        const Param& sig, const Param& filt);
+#define INSTANTIATE(T, accT)                                           \
+    template void conv2<T, accT>(conv_kparam_t&, Param&, const Param&, \
+                                 const Param&, const bool);
 
 }  // namespace kernel
-
 }  // namespace opencl

@@ -15,6 +15,7 @@ target_sources(cpp_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/clamp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/colorspace.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/complex.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/confidence_connected.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolve.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/corrcoef.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/covariance.cpp
@@ -23,6 +24,7 @@ target_sources(cpp_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/diff.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/event.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exampleFunction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exception.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fast.cpp
@@ -43,9 +45,11 @@ target_sources(cpp_api_interface
     ${CMAKE_CURRENT_SOURCE_DIR}/imageio.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/internal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jit_test_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lapack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/matchTemplate.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mean.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/meanvar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/meanshift.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/median.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/moments.cpp

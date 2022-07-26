@@ -15,8 +15,8 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
 #include <common/ArrayInfo.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <common/half.hpp>
 #include <complex.hpp>
@@ -30,8 +30,23 @@
 #include <af/data.h>
 #include <af/defines.h>
 
+using af::dim4;
 using common::half;
-using namespace detail;
+using detail::arithOp;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::cplx;
+using detail::createValueArray;
+using detail::imag;
+using detail::intl;
+using detail::logicOp;
+using detail::real;
+using detail::scalar;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 template<typename T, af_op_t op>
 static inline af_array unaryOp(const af_array in) {
@@ -195,13 +210,13 @@ struct unaryOpCplxFun<Tc, Tr, af_log_t> {
         // --> phi = atan2(b, a)
         Array<Tr> phi = arithOp<Tr, af_atan2_t>(b, a, b.dims());
 
-        Array<Tr> r = abs<Tr>(z);
+        Array<Tr> r = detail::abs<Tr>(z);
 
         // compute log
         // log(r)
         Array<Tr> a_out = unaryOp<Tr, af_log_t>(r);
         // phi
-        Array<Tr> b_out = phi;
+        const Array<Tr> &b_out = phi;
 
         // log(r) + i * phi
         return cplx<Tc, Tr>(a_out, b_out, a_out.dims());
@@ -515,7 +530,7 @@ struct unaryOpCplxFun<Tc, Tr, af_sqrt_t> {
         // phi = arg(a + ib)
         // --> phi = atan2(b, a)
         Array<Tr> phi = arithOp<Tr, af_atan2_t>(b, a, b.dims());
-        Array<Tr> r   = abs<Tr>(z);
+        Array<Tr> r   = detail::abs<Tr>(z);
 
         // compute sqrt
         Array<Tr> two = createValueArray<Tr>(phi.dims(), 2.0);
@@ -557,6 +572,41 @@ af_err af_not(af_array *out, const af_array in) {
     }
     CATCHALL;
 
+    return AF_SUCCESS;
+}
+
+template<typename T>
+static inline af_array bitOpNot(const af_array in) {
+    return unaryOp<T, af_bitnot_t>(in);
+}
+
+af_err af_bitnot(af_array *out, const af_array in) {
+    try {
+        const ArrayInfo &iinfo = getInfo(in);
+        const af_dtype type    = iinfo.getType();
+
+        dim4 odims = iinfo.dims();
+
+        if (odims.ndims() == 0) {
+            return af_create_handle(out, 0, nullptr, type);
+        }
+
+        af_array res;
+        switch (type) {
+            case s32: res = bitOpNot<int>(in); break;
+            case u32: res = bitOpNot<uint>(in); break;
+            case u8: res = bitOpNot<uchar>(in); break;
+            case b8: res = bitOpNot<char>(in); break;
+            case s64: res = bitOpNot<intl>(in); break;
+            case u64: res = bitOpNot<uintl>(in); break;
+            case s16: res = bitOpNot<short>(in); break;
+            case u16: res = bitOpNot<ushort>(in); break;
+            default: TYPE_ERROR(0, type);
+        }
+
+        std::swap(*out, res);
+    }
+    CATCHALL;
     return AF_SUCCESS;
 }
 
@@ -631,14 +681,16 @@ static inline af_array checkOp(const af_array in) {
 
 template<af_op_t op>
 struct cplxLogicOp {
-    af_array operator()(Array<char> resR, Array<char> resI, dim4 dims) {
+    af_array operator()(const Array<char> &resR, const Array<char> &resI,
+                        const dim4 &dims) {
         return getHandle(logicOp<char, af_or_t>(resR, resI, dims));
     }
 };
 
 template<>
 struct cplxLogicOp<af_iszero_t> {
-    af_array operator()(Array<char> resR, Array<char> resI, dim4 dims) {
+    af_array operator()(const Array<char> &resR, const Array<char> &resI,
+                        const dim4 &dims) {
         return getHandle(logicOp<char, af_and_t>(resR, resI, dims));
     }
 };
@@ -652,7 +704,7 @@ static inline af_array checkOpCplx(const af_array in) {
     Array<char> resI = checkOp<BT, op>(I);
 
     const ArrayInfo &in_info = getInfo(in);
-    dim4 dims                = in_info.dims();
+    const dim4 &dims         = in_info.dims();
     cplxLogicOp<op> cplxLogic;
     af_array res = cplxLogic(resR, resI, dims);
 
@@ -669,10 +721,12 @@ static af_err af_check(af_array *out, const af_array in) {
 
         // Convert all inputs to floats / doubles / complex
         af_dtype type = implicit(in_type, f32);
+        if (in_type == f16) { type = f16; }
 
         switch (type) {
             case f32: res = checkOp<float, op>(in); break;
             case f64: res = checkOp<double, op>(in); break;
+            case f16: res = checkOp<half, op>(in); break;
             case c32: res = checkOpCplx<cfloat, float, op>(in); break;
             case c64: res = checkOpCplx<cdouble, double, op>(in); break;
             default: TYPE_ERROR(1, in_type); break;

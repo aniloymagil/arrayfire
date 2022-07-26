@@ -36,13 +36,35 @@ foreach(SBK_BINARY_OP ${SBK_BINARY_OPS})
         ../common
         ../../../include
         ${CMAKE_CURRENT_BINARY_DIR}
+        $<TARGET_PROPERTY:af_spdlog,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:OpenCL::OpenCL,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:OpenCL::cl2hpp,INTERFACE_INCLUDE_DIRECTORIES>
         $<TARGET_PROPERTY:Boost::boost,INTERFACE_INCLUDE_DIRECTORIES>
-        $<TARGET_PROPERTY:af_glad_interface,INTERFACE_INCLUDE_DIRECTORIES>
-        ${ArrayFire_SOURCE_DIR}/extern/forge/include
-        ${ArrayFire_BINARY_DIR}/extern/forge/include
+        ${ArrayFire_BINARY_DIR}/include
       )
+    if(TARGET Forge::forge)
+      target_include_directories(opencl_scan_by_key_${SBK_BINARY_OP}
+        SYSTEM INTERFACE
+        $<TARGET_PROPERTY:Forge::forge,INCLUDE_DIRECTORIES>
+      )
+    else()
+      target_include_directories(opencl_scan_by_key_${SBK_BINARY_OP}
+        SYSTEM INTERFACE
+        ${${forge_prefix}_SOURCE_DIR}/include
+        ${${forge_prefix}_BINARY_DIR}/include
+      )
+    endif()
+    if(TARGET glad::glad)
+      target_include_directories(opencl_scan_by_key_${SBK_BINARY_OP}
+        SYSTEM INTERFACE
+        $<TARGET_PROPERTY:glad::glad,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    else()
+      target_include_directories(opencl_scan_by_key_${SBK_BINARY_OP}
+        SYSTEM INTERFACE
+        $<TARGET_PROPERTY:af_glad,INTERFACE_INCLUDE_DIRECTORIES>
+      )
+    endif()
 
     set_target_properties(opencl_scan_by_key_${SBK_BINARY_OP}
       PROPERTIES

@@ -7,6 +7,8 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#pragma once
+
 namespace common {
 
 /// \brief Maps a type between its data representation and the type used
@@ -30,4 +32,4 @@ struct kernel_type {
     /// The type defined by the compute framework for this type
     using native = compute;
 };
-}
+}  // namespace common

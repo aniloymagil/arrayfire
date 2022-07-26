@@ -77,25 +77,51 @@ have finished.
 
 ===============================================================================
 
-\defgroup device_func_alloc alloc
+\defgroup device_func_alloc allocV2
 \ingroup device_mat
 
 \brief Allocate memory using the ArrayFire memory manager
 
 This function will allocate memory on the device and return a pointer
 to it. The memory is allocated using ArrayFire's memory manager which
-has some different characteristics to standard method of memory
-allocation
+will defer releasing memory to the driver and reuse the same memory
+for later operations.
+
+This function will return different objects based on the type used. The
+interface returns a void pointer that needs to be cast to the backend
+appropriate memory type.
+
+
+| function                     | CPU | CUDA | OpenCL      |
+|------------------------------|-----|------|-------------|
+| af_alloc_device_v2           | T*  | T*   | cl_mem      |
+| af::allocV2                  | T*  | T*   | cl_mem      |
+| af_alloc_device (deprecated) | T*  | T*   | cl::Buffer* |
+| af::alloc (deprecated)       | T*  | T*   | cl::Buffer* |
+
+CPU Backend
+-----------
+\snippet test/memory.cpp ex_alloc_v2_cpu
+
+CUDA Backend
+------------
+\snippet test/cuda.cu ex_alloc_v2_cuda
+
+OpenCL Backend
+--------------
+\snippet test/ocl_ext_context.cpp ex_alloc_v2_opencl
 
 ===============================================================================
 
-\defgroup device_func_free free
+\defgroup device_func_free freeV2
 \ingroup device_mat
 
-\brief Free device memory allocated by ArrayFire's memory manager
+\brief Returns memory to ArrayFire's memory manager. The memory will
+       return to the memory pool.
 
-These calls free the device memory. These functions need to be called on
-pointers allocated using alloc function.
+Releases control of the memory allocated by af::allocV2 functions to ArrayFire's
+memory manager. ArrayFire may reuse the memory for subsequent operations. This
+memory should not be used by the client after this point.
 
 ===============================================================================
 

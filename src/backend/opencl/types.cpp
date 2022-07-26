@@ -13,8 +13,8 @@
 #include <type_util.hpp>
 
 #include <cmath>
-#include <string>
 #include <sstream>
+#include <string>
 
 using common::half;
 
@@ -65,7 +65,7 @@ std::string ToNumStr<half>::operator()(half val) {
     static const char *PINF = "+INFINITY";
     static const char *NINF = "-INFINITY";
     if (common::isinf(val)) { return val < 0.f ? NINF : PINF; }
-    return to_string(move(val));
+    return common::to_string(val);
 }
 
 template<>
@@ -77,41 +77,22 @@ std::string ToNumStr<half>::operator()<float>(float val) {
     return std::to_string(val);
 }
 
+#define INSTANTIATE(TYPE) template struct ToNumStr<TYPE>
 
-#define INSTANTIATE(TYPE)                       \
-  template struct ToNumStr<TYPE>
-
-  INSTANTIATE(float);
-  INSTANTIATE(double);
-  INSTANTIATE(cfloat);
-  INSTANTIATE(cdouble);
-  INSTANTIATE(short);
-  INSTANTIATE(ushort);
-  INSTANTIATE(int);
-  INSTANTIATE(uint);
-  INSTANTIATE(intl);
-  INSTANTIATE(uintl);
-  INSTANTIATE(uchar);
-  INSTANTIATE(char);
-  INSTANTIATE(half);
+INSTANTIATE(float);
+INSTANTIATE(double);
+INSTANTIATE(cfloat);
+INSTANTIATE(cdouble);
+INSTANTIATE(short);
+INSTANTIATE(ushort);
+INSTANTIATE(int);
+INSTANTIATE(uint);
+INSTANTIATE(intl);
+INSTANTIATE(uintl);
+INSTANTIATE(uchar);
+INSTANTIATE(char);
+INSTANTIATE(half);
 
 #undef INSTANTIATE
 
 }  // namespace opencl
-
-namespace common {
-template<typename T>
-class kernel_type;
-}
-
-namespace common {
-template<>
-struct kernel_type<common::half> {
-    using data = common::half;
-
-    using compute = cl_half;
-
-    // These are the types within a kernel
-    using native = cl_half;
-};
-}

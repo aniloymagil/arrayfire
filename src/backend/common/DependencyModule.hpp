@@ -8,13 +8,23 @@
  ********************************************************/
 
 #pragma once
+
+#include <common/Logger.hpp>
 #include <common/defines.hpp>
 #include <common/module_loading.hpp>
 
+#include <memory>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+namespace spdlog {
+class logger;
+}
 namespace common {
+
+using Version = std::tuple<int, int, int>;  // major, minor, patch
 
 /// Allows you to create classes which dynamically load dependencies at runtime
 ///
@@ -24,13 +34,25 @@ namespace common {
 /// we use in ArrayFire
 class DependencyModule {
     LibHandle handle;
+    std::shared_ptr<spdlog::logger> logger;
     std::vector<void*> functions;
 
    public:
+    /// Loads the library \p plugin_file_name from the \p paths locations
+    /// \param plugin_file_name  The name of the library without any prefix or
+    ///                          extensions
+    /// \param paths             The locations to search for the libraries if
+    ///                          not found in standard locations
     DependencyModule(const char* plugin_file_name,
                      const char** paths = nullptr);
 
-    ~DependencyModule();
+    DependencyModule(const std::vector<std::string>& plugin_base_file_name,
+                     const std::vector<std::string>& suffixes,
+                     const std::vector<std::string>& paths,
+                     const size_t verListSize = 0,
+                     const Version* versions  = nullptr);
+
+    ~DependencyModule() noexcept;
 
     /// Returns a function pointer to the function with the name symbol_name
     template<typename T>
@@ -40,14 +62,16 @@ class DependencyModule {
     }
 
     /// Returns true if the module was successfully loaded
-    bool isLoaded();
+    bool isLoaded() const noexcept;
 
-    /// Returns true if the module was successfully loaded
-    bool symbolsLoaded();
+    /// Returns true if all of the symbols for the module were loaded
+    bool symbolsLoaded() const noexcept;
 
     /// Returns the last error message that occurred because of loading the
     /// library
-    std::string getErrorMessage();
+    static std::string getErrorMessage() noexcept;
+
+    spdlog::logger* getLogger() const noexcept;
 };
 
 }  // namespace common
@@ -57,4 +81,4 @@ class DependencyModule {
 
 /// Dynamically loads the function pointer at runtime
 #define MODULE_FUNCTION_INIT(NAME) \
-    NAME = module.getSymbol<decltype(&::NAME)>(#NAME)
+    NAME = module.getSymbol<decltype(&::NAME)>(#NAME);

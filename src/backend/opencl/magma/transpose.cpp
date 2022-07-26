@@ -54,20 +54,26 @@
 #include "kernel/transpose.hpp"
 #include "magma_data.h"
 
+using cl::Buffer;
+using cl::CommandQueue;
+using opencl::makeParam;
+using opencl::kernel::transpose;
+
 template<typename T>
 void magmablas_transpose(magma_int_t m, magma_int_t n, cl_mem dA,
                          size_t dA_offset, magma_int_t ldda, cl_mem dAT,
                          size_t dAT_offset, magma_int_t lddat,
                          magma_queue_t queue) {
     magma_int_t info = 0;
-    if (m < 0)
+    if (m < 0) {
         info = -1;
-    else if (n < 0)
+    } else if (n < 0) {
         info = -2;
-    else if (ldda < m)
+    } else if (ldda < m) {
         info = -4;
-    else if (lddat < n)
+    } else if (lddat < n) {
         info = -6;
+    }
 
     if (info != 0) {
         // magma_xerbla( __func__, -(info) );
@@ -75,25 +81,20 @@ void magmablas_transpose(magma_int_t m, magma_int_t n, cl_mem dA,
     }
 
     /* Quick return */
-    if ((m == 0) || (n == 0)) return;
+    if ((m == 0) || (n == 0)) { return; }
 
     int idims[]    = {m, n, 1, 1};
     int odims[]    = {n, m, 1, 1};
     int istrides[] = {1, ldda, ldda * n, ldda * n};
     int ostrides[] = {1, lddat, lddat * m, lddat * m};
 
-    using namespace opencl;
+    Buffer dATBuf(dAT, true);
+    Buffer dABuf(dA, true);
 
-    cl::CommandQueue q(queue, true);
-    if (m % 32 == 0 && n % 32 == 0) {
-        kernel::transpose<T, false, true>(
-            makeParam(dAT, dAT_offset, odims, ostrides),
-            makeParam(dA, dA_offset, idims, istrides), q);
-    } else {
-        kernel::transpose<T, false, false>(
-            makeParam(dAT, dAT_offset, odims, ostrides),
-            makeParam(dA, dA_offset, idims, istrides), q);
-    }
+    CommandQueue q(queue, true);
+    transpose<T>(makeParam(dATBuf, dAT_offset, odims, ostrides),
+                 makeParam(dABuf, dA_offset, idims, istrides), q, false,
+                 m % 32 == 0 && n % 32 == 0);
 }
 
 #define INSTANTIATE(T)                                                      \

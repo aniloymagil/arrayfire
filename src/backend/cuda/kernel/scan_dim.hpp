@@ -10,28 +10,26 @@
 #include <Param.hpp>
 #include <backend.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
 #include <err_cuda.hpp>
 #include <memory.hpp>
-#include <nvrtc/cache.hpp>
 #include <nvrtc_kernel_headers/scan_dim_cuh.hpp>
 #include "config.hpp"
 
 namespace cuda {
 namespace kernel {
 
-static const std::string ScanDimSource(scan_dim_cuh, scan_dim_cuh_len);
-
 template<typename Ti, typename To, af_op_t op>
 static void scan_dim_launcher(Param<To> out, Param<To> tmp, CParam<Ti> in,
                               const uint threads_y, const dim_t blocks_all[4],
                               int dim, bool isFinalPass, bool inclusive_scan) {
-    auto scan_dim =
-        getKernel("cuda::scan_dim", ScanDimSource,
-                  {TemplateTypename<Ti>(), TemplateTypename<To>(),
-                   TemplateArg(op), TemplateArg(dim), TemplateArg(isFinalPass),
-                   TemplateArg(threads_y), TemplateArg(inclusive_scan)},
-                  {DefineValue(THREADS_X)});
+    auto scan_dim = common::getKernel(
+        "cuda::scan_dim", {scan_dim_cuh_src},
+        {TemplateTypename<Ti>(), TemplateTypename<To>(), TemplateArg(op),
+         TemplateArg(dim), TemplateArg(isFinalPass), TemplateArg(threads_y),
+         TemplateArg(inclusive_scan)},
+        {DefineValue(THREADS_X)});
 
     dim3 threads(THREADS_X, threads_y);
 
@@ -46,7 +44,7 @@ static void scan_dim_launcher(Param<To> out, Param<To> tmp, CParam<Ti> in,
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
     scan_dim(qArgs, out, tmp, in, blocks_all[0], blocks_all[1], blocks_all[dim],
-            lim);
+             lim);
     POST_LAUNCH_CHECK();
 }
 
@@ -54,9 +52,9 @@ template<typename To, af_op_t op>
 static void bcast_dim_launcher(Param<To> out, CParam<To> tmp,
                                const uint threads_y, const dim_t blocks_all[4],
                                int dim, bool inclusive_scan) {
-    auto scan_dim_bcast =
-        getKernel("cuda::scan_dim_bcast", ScanDimSource,
-                  {TemplateTypename<To>(), TemplateArg(op), TemplateArg(dim)});
+    auto scan_dim_bcast = common::getKernel(
+        "cuda::scan_dim_bcast", {scan_dim_cuh_src},
+        {TemplateTypename<To>(), TemplateArg(op), TemplateArg(dim)});
 
     dim3 threads(THREADS_X, threads_y);
 
@@ -70,8 +68,8 @@ static void bcast_dim_launcher(Param<To> out, CParam<To> tmp,
     uint lim = divup(out.dims[dim], (threads_y * blocks_all[dim]));
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
-    scan_dim_bcast(qArgs, out, tmp, blocks_all[0], blocks_all[1], blocks_all[dim],
-             lim, inclusive_scan);
+    scan_dim_bcast(qArgs, out, tmp, blocks_all[0], blocks_all[1],
+                   blocks_all[dim], lim, inclusive_scan);
     POST_LAUNCH_CHECK();
 }
 

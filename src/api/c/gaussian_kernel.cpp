@@ -10,6 +10,7 @@
 #include <arith.hpp>
 #include <backend.hpp>
 #include <common/err_common.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <math.hpp>
 #include <range.hpp>
@@ -20,7 +21,16 @@
 #include <af/dim4.hpp>
 #include <af/image.h>
 
-using namespace detail;
+using af::dim4;
+using detail::arithOp;
+using detail::Array;
+using detail::createValueArray;
+using detail::getScalar;
+using detail::range;
+using detail::reduce_all;
+using detail::scalar;
+using detail::transpose;
+using detail::unaryOp;
 
 template<typename T>
 Array<T> gaussianKernel(const int rows, const int cols, const double sigma_r,
@@ -36,8 +46,8 @@ Array<T> gaussianKernel(const int rows, const int cols, const double sigma_r,
         Array<T> wt = range<T>(dim4(cols, rows), 0);
         Array<T> w  = transpose<T>(wt, false);
 
-        Array<T> c =
-            createValueArray<T>(odims, scalar<T>((double)(cols - 1) / 2.0));
+        Array<T> c = createValueArray<T>(
+            odims, scalar<T>(static_cast<double>(cols - 1) / 2.0));
         w = arithOp<T, af_sub_t>(w, c, odims);
 
         sigma        = sigma_c > 0 ? sigma_c : 0.25 * cols;
@@ -51,8 +61,8 @@ Array<T> gaussianKernel(const int rows, const int cols, const double sigma_r,
     if (rows > 1) {
         Array<T> w = range<T>(dim4(rows, cols), 0);
 
-        Array<T> r =
-            createValueArray<T>(odims, scalar<T>((double)(rows - 1) / 2.0));
+        Array<T> r = createValueArray<T>(
+            odims, scalar<T>(static_cast<double>(rows - 1) / 2.0));
         w = arithOp<T, af_sub_t>(w, r, odims);
 
         sigma        = sigma_r > 0 ? sigma_r : 0.25 * rows;
@@ -69,7 +79,7 @@ Array<T> gaussianKernel(const int rows, const int cols, const double sigma_r,
 
     // Use this instead of (2 * pi * sig^2);
     // This ensures the window adds up to 1
-    T norm_factor = reduce_all<af_add_t, T, T>(tmp);
+    T norm_factor = getScalar<T>(reduce_all<af_add_t, T, T>(tmp));
 
     Array<T> norm = createValueArray(odims, norm_factor);
     Array<T> res  = arithOp<T, af_div_t>(tmp, norm, odims);

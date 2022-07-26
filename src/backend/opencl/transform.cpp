@@ -7,42 +7,38 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <Array.hpp>
-#include <kernel/transform.hpp>
 #include <transform.hpp>
-#include <af/dim4.hpp>
-#include <stdexcept>
+
+#include <kernel/transform.hpp>
 
 namespace opencl {
-template<typename T>
-Array<T> transform(const Array<T> &in, const Array<float> &tf,
-                   const af::dim4 &odims, const af_interp_type method,
-                   const bool inverse, const bool perspective) {
-    Array<T> out = createEmptyArray<T>(odims);
 
+template<typename T>
+void transform(Array<T> &out, const Array<T> &in, const Array<float> &tf,
+               const af_interp_type method, const bool inverse,
+               const bool perspective) {
     switch (method) {
         case AF_INTERP_NEAREST:
         case AF_INTERP_LOWER:
-            kernel::transform<T, 1>(out, in, tf, inverse, perspective, method);
+            kernel::transform<T>(out, in, tf, inverse, perspective, method, 1);
             break;
         case AF_INTERP_BILINEAR:
         case AF_INTERP_BILINEAR_COSINE:
-            kernel::transform<T, 2>(out, in, tf, inverse, perspective, method);
+            kernel::transform<T>(out, in, tf, inverse, perspective, method, 2);
             break;
         case AF_INTERP_BICUBIC:
         case AF_INTERP_BICUBIC_SPLINE:
-            kernel::transform<T, 3>(out, in, tf, inverse, perspective, method);
+            kernel::transform<T>(out, in, tf, inverse, perspective, method, 3);
             break;
         default: AF_ERROR("Unsupported interpolation type", AF_ERR_ARG);
     }
-    return out;
 }
 
-#define INSTANTIATE(T)                                                      \
-    template Array<T> transform(const Array<T> &in, const Array<float> &tf, \
-                                const af::dim4 &odims,                      \
-                                const af_interp_type method,                \
-                                const bool inverse, const bool perspective);
+#define INSTANTIATE(T)                                                       \
+    template void transform(Array<T> &out, const Array<T> &in,               \
+                            const Array<float> &tf,                          \
+                            const af_interp_type method, const bool inverse, \
+                            const bool perspective);
 
 INSTANTIATE(float)
 INSTANTIATE(double)
@@ -56,4 +52,5 @@ INSTANTIATE(uchar)
 INSTANTIATE(char)
 INSTANTIATE(short)
 INSTANTIATE(ushort)
+
 }  // namespace opencl

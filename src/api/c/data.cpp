@@ -27,7 +27,18 @@
 
 using af::dim4;
 using common::half;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createValueArray;
+using detail::intl;
+using detail::iota;
+using detail::padArrayBorders;
+using detail::range;
+using detail::scalar;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 dim4 verifyDims(const unsigned ndims, const dim_t *const dims) {
     DIM_ASSERT(1, ndims >= 1);
@@ -49,12 +60,8 @@ af_err af_constant(af_array *result, const double value, const unsigned ndims,
         af_array out;
         AF_CHECK(af_init());
 
-        dim4 d(1, 1, 1, 1);
-        if (ndims <= 0) {
-            return af_create_handle(result, 0, nullptr, type);
-        } else {
-            d = verifyDims(ndims, dims);
-        }
+        if (ndims <= 0) { return af_create_handle(result, 0, nullptr, type); }
+        dim4 d = verifyDims(ndims, dims);
 
         switch (type) {
             case f32: out = createHandleFromValue<float>(d, value); break;
@@ -92,12 +99,8 @@ af_err af_constant_complex(af_array *result, const double real,
         af_array out;
         AF_CHECK(af_init());
 
-        dim4 d(1, 1, 1, 1);
-        if (ndims <= 0) {
-            return af_create_handle(result, 0, nullptr, type);
-        } else {
-            d = verifyDims(ndims, dims);
-        }
+        if (ndims <= 0) { return af_create_handle(result, 0, nullptr, type); }
+        dim4 d = verifyDims(ndims, dims);
 
         switch (type) {
             case c32: out = createCplx<cfloat, float>(d, real, imag); break;
@@ -117,12 +120,8 @@ af_err af_constant_long(af_array *result, const intl val, const unsigned ndims,
         af_array out;
         AF_CHECK(af_init());
 
-        dim4 d(1, 1, 1, 1);
-        if (ndims <= 0) {
-            return af_create_handle(result, 0, nullptr, s64);
-        } else {
-            d = verifyDims(ndims, dims);
-        }
+        if (ndims <= 0) { return af_create_handle(result, 0, nullptr, s64); }
+        dim4 d = verifyDims(ndims, dims);
 
         out = getHandle(createValueArray<intl>(d, val));
 
@@ -139,12 +138,9 @@ af_err af_constant_ulong(af_array *result, const uintl val,
         af_array out;
         AF_CHECK(af_init());
 
-        dim4 d(1, 1, 1, 1);
-        if (ndims <= 0) {
-            return af_create_handle(result, 0, nullptr, u64);
-        } else {
-            d = verifyDims(ndims, dims);
-        }
+        if (ndims <= 0) { return af_create_handle(result, 0, nullptr, u64); }
+        dim4 d = verifyDims(ndims, dims);
+
         out = getHandle(createValueArray<uintl>(d, val));
 
         std::swap(*result, out);
@@ -207,12 +203,8 @@ af_err af_range(af_array *result, const unsigned ndims, const dim_t *const dims,
         af_array out;
         AF_CHECK(af_init());
 
-        dim4 d(0);
-        if (ndims <= 0) {
-            return af_create_handle(result, 0, nullptr, type);
-        } else {
-            d = verifyDims(ndims, dims);
-        }
+        if (ndims <= 0) { return af_create_handle(result, 0, nullptr, type); }
+        dim4 d = verifyDims(ndims, dims);
 
         switch (type) {
             case f32: out = range_<float>(d, seq_dim); break;
@@ -333,7 +325,7 @@ af_err af_diag_extract(af_array *out, const af_array in, const int num) {
 
         DIM_ASSERT(1, in_info.ndims() >= 2);
 
-        af_array result;
+        af_array result = nullptr;
         switch (type) {
             case f32: result = diagExtract<float>(in, num); break;
             case c32: result = diagExtract<cfloat>(in, num); break;
@@ -362,12 +354,10 @@ af_err af_diag_extract(af_array *out, const af_array in, const int num) {
     return AF_SUCCESS;
 }
 
-template<typename T, bool is_upper>
-af_array triangle(const af_array in, bool is_unit_diag) {
-    if (is_unit_diag)
-        return getHandle(triangle<T, is_upper, true>(getArray<T>(in)));
-    else
-        return getHandle(triangle<T, is_upper, false>(getArray<T>(in)));
+template<typename T>
+inline af_array triangle(const af_array in, const bool is_upper,
+                         const bool is_unit_diag) {
+    return getHandle(triangle<T>(getArray<T>(in), is_upper, is_unit_diag));
 }
 
 af_err af_lower(af_array *out, const af_array in, bool is_unit_diag) {
@@ -377,21 +367,21 @@ af_err af_lower(af_array *out, const af_array in, bool is_unit_diag) {
 
         if (info.ndims() == 0) { return af_retain_array(out, in); }
 
-        af_array res;
+        af_array res = nullptr;
         switch (type) {
-            case f32: res = triangle<float, false>(in, is_unit_diag); break;
-            case f64: res = triangle<double, false>(in, is_unit_diag); break;
-            case c32: res = triangle<cfloat, false>(in, is_unit_diag); break;
-            case c64: res = triangle<cdouble, false>(in, is_unit_diag); break;
-            case s32: res = triangle<int, false>(in, is_unit_diag); break;
-            case u32: res = triangle<uint, false>(in, is_unit_diag); break;
-            case s64: res = triangle<intl, false>(in, is_unit_diag); break;
-            case u64: res = triangle<uintl, false>(in, is_unit_diag); break;
-            case s16: res = triangle<short, false>(in, is_unit_diag); break;
-            case u16: res = triangle<ushort, false>(in, is_unit_diag); break;
-            case u8: res = triangle<uchar, false>(in, is_unit_diag); break;
-            case b8: res = triangle<char, false>(in, is_unit_diag); break;
-            case f16: res = triangle<half, false>(in, is_unit_diag); break;
+            case f32: res = triangle<float>(in, false, is_unit_diag); break;
+            case f64: res = triangle<double>(in, false, is_unit_diag); break;
+            case c32: res = triangle<cfloat>(in, false, is_unit_diag); break;
+            case c64: res = triangle<cdouble>(in, false, is_unit_diag); break;
+            case s32: res = triangle<int>(in, false, is_unit_diag); break;
+            case u32: res = triangle<uint>(in, false, is_unit_diag); break;
+            case s64: res = triangle<intl>(in, false, is_unit_diag); break;
+            case u64: res = triangle<uintl>(in, false, is_unit_diag); break;
+            case s16: res = triangle<short>(in, false, is_unit_diag); break;
+            case u16: res = triangle<ushort>(in, false, is_unit_diag); break;
+            case u8: res = triangle<uchar>(in, false, is_unit_diag); break;
+            case b8: res = triangle<char>(in, false, is_unit_diag); break;
+            case f16: res = triangle<half>(in, false, is_unit_diag); break;
         }
         std::swap(*out, res);
     }
@@ -406,21 +396,75 @@ af_err af_upper(af_array *out, const af_array in, bool is_unit_diag) {
 
         if (info.ndims() == 0) { return af_retain_array(out, in); }
 
-        af_array res;
+        af_array res = nullptr;
         switch (type) {
-            case f32: res = triangle<float, true>(in, is_unit_diag); break;
-            case f64: res = triangle<double, true>(in, is_unit_diag); break;
-            case c32: res = triangle<cfloat, true>(in, is_unit_diag); break;
-            case c64: res = triangle<cdouble, true>(in, is_unit_diag); break;
-            case s32: res = triangle<int, true>(in, is_unit_diag); break;
-            case u32: res = triangle<uint, true>(in, is_unit_diag); break;
-            case s64: res = triangle<intl, true>(in, is_unit_diag); break;
-            case u64: res = triangle<uintl, true>(in, is_unit_diag); break;
-            case s16: res = triangle<short, true>(in, is_unit_diag); break;
-            case u16: res = triangle<ushort, true>(in, is_unit_diag); break;
-            case u8: res = triangle<uchar, true>(in, is_unit_diag); break;
-            case b8: res = triangle<char, true>(in, is_unit_diag); break;
-            case f16: res = triangle<half, true>(in, is_unit_diag); break;
+            case f32: res = triangle<float>(in, true, is_unit_diag); break;
+            case f64: res = triangle<double>(in, true, is_unit_diag); break;
+            case c32: res = triangle<cfloat>(in, true, is_unit_diag); break;
+            case c64: res = triangle<cdouble>(in, true, is_unit_diag); break;
+            case s32: res = triangle<int>(in, true, is_unit_diag); break;
+            case u32: res = triangle<uint>(in, true, is_unit_diag); break;
+            case s64: res = triangle<intl>(in, true, is_unit_diag); break;
+            case u64: res = triangle<uintl>(in, true, is_unit_diag); break;
+            case s16: res = triangle<short>(in, true, is_unit_diag); break;
+            case u16: res = triangle<ushort>(in, true, is_unit_diag); break;
+            case u8: res = triangle<uchar>(in, true, is_unit_diag); break;
+            case b8: res = triangle<char>(in, true, is_unit_diag); break;
+            case f16: res = triangle<half>(in, true, is_unit_diag); break;
+        }
+        std::swap(*out, res);
+    }
+    CATCHALL
+    return AF_SUCCESS;
+}
+
+template<typename T>
+inline af_array pad(const af_array in, const dim4 &lPad, const dim4 &uPad,
+                    const af::borderType ptype) {
+    return getHandle(padArrayBorders<T>(getArray<T>(in), lPad, uPad, ptype));
+}
+
+af_err af_pad(af_array *out, const af_array in, const unsigned begin_ndims,
+              const dim_t *const begin_dims, const unsigned end_ndims,
+              const dim_t *const end_dims, const af_border_type pad_type) {
+    try {
+        DIM_ASSERT(2, begin_ndims > 0 && begin_ndims <= 4);
+        DIM_ASSERT(4, end_ndims > 0 && end_ndims <= 4);
+        ARG_ASSERT(3, begin_dims != NULL);
+        ARG_ASSERT(5, end_dims != NULL);
+        ARG_ASSERT(6, (pad_type >= AF_PAD_ZERO && pad_type <= AF_PAD_PERIODIC));
+        for (unsigned i = 0; i < begin_ndims; i++) {
+            DIM_ASSERT(3, begin_dims[i] >= 0);
+        }
+        for (unsigned i = 0; i < end_ndims; i++) {
+            DIM_ASSERT(5, end_dims[i] >= 0);
+        }
+
+        dim4 lPad(begin_ndims, begin_dims);
+        dim4 uPad(end_ndims, end_dims);
+        for (unsigned i = begin_ndims; i < AF_MAX_DIMS; i++) { lPad[i] = 0; }
+        for (unsigned i = end_ndims; i < AF_MAX_DIMS; i++) { uPad[i] = 0; }
+
+        const ArrayInfo &info = getInfo(in);
+        af_dtype type         = info.getType();
+
+        if (info.ndims() == 0) { return af_retain_array(out, in); }
+
+        af_array res = 0;
+        switch (type) {
+            case f32: res = pad<float>(in, lPad, uPad, pad_type); break;
+            case f64: res = pad<double>(in, lPad, uPad, pad_type); break;
+            case c32: res = pad<cfloat>(in, lPad, uPad, pad_type); break;
+            case c64: res = pad<cdouble>(in, lPad, uPad, pad_type); break;
+            case s32: res = pad<int>(in, lPad, uPad, pad_type); break;
+            case u32: res = pad<uint>(in, lPad, uPad, pad_type); break;
+            case s64: res = pad<intl>(in, lPad, uPad, pad_type); break;
+            case u64: res = pad<uintl>(in, lPad, uPad, pad_type); break;
+            case s16: res = pad<short>(in, lPad, uPad, pad_type); break;
+            case u16: res = pad<ushort>(in, lPad, uPad, pad_type); break;
+            case u8: res = pad<uchar>(in, lPad, uPad, pad_type); break;
+            case b8: res = pad<char>(in, lPad, uPad, pad_type); break;
+            case f16: res = pad<half>(in, lPad, uPad, pad_type); break;
         }
         std::swap(*out, res);
     }

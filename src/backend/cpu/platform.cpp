@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <common/MemoryManagerBase.hpp>
 #include <common/defines.hpp>
 #include <common/host_memory.hpp>
 #include <device_manager.hpp>
@@ -14,20 +15,22 @@
 #include <version.hpp>
 #include <af/version.h>
 
-#include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <memory>
 #include <sstream>
+#include <string>
 
+using common::memory::MemoryManagerBase;
 using std::endl;
-using std::not1;
 using std::ostringstream;
-using std::ptr_fun;
 using std::stoi;
 using std::string;
+using std::unique_ptr;
 
 namespace cpu {
 
-static const string get_system(void) {
+static string get_system() {
     string arch = (sizeof(void*) == 4) ? "32-bit " : "64-bit ";
 
     return arch +
@@ -40,17 +43,9 @@ static const string get_system(void) {
 #endif
 }
 
-// http://stackoverflow.com/questions/216823/whats-the-best-way-to-trim-stdstring/217605#217605
-// trim from start
-static inline string& ltrim(string& s) {
-    s.erase(s.begin(),
-            find_if(s.begin(), s.end(), not1(ptr_fun<int, int>(isspace))));
-    return s;
-}
-
 int getBackend() { return AF_BACKEND_CPU; }
 
-string getDeviceInfo() {
+string getDeviceInfo() noexcept {
     const CPUInfo cinfo = DeviceManager::getInstance().getCPUInfo();
 
     ostringstream info;
@@ -60,14 +55,16 @@ string getDeviceInfo() {
 
     string model = cinfo.model();
 
-    size_t memMB = getDeviceMemorySize(getActiveDeviceId()) / 1048576;
+    size_t memMB =
+        getDeviceMemorySize(static_cast<int>(getActiveDeviceId())) / 1048576;
 
     info << string("[0] ") << cinfo.vendor() << ": " << ltrim(model);
 
-    if (memMB)
+    if (memMB) {
         info << ", " << memMB << " MB, ";
-    else
+    } else {
         info << ", Unknown MB, ";
+    }
 
     info << "Max threads(" << cinfo.threads() << ") ";
 #ifndef NDEBUG
@@ -98,14 +95,14 @@ void devprop(char* d_name, char* d_platform, char* d_toolkit, char* d_compute) {
     snprintf(d_compute, 10, "%s", "0.0");
 }
 
-unsigned getMaxJitSize() {
-    const int MAX_JIT_LEN = 100;
-
-    thread_local int length = 0;
-    if (length == 0) {
+int& getMaxJitSize() {
+    constexpr int MAX_JIT_LEN = 100;
+    thread_local int length   = 0;
+    if (length <= 0) {
         string env_var = getEnvVar("AF_CPU_MAX_JIT_LEN");
         if (!env_var.empty()) {
-            length = stoi(env_var);
+            int input_len = stoi(env_var);
+            length        = input_len > 0 ? input_len : MAX_JIT_LEN;
         } else {
             length = MAX_JIT_LEN;
         }
@@ -115,8 +112,13 @@ unsigned getMaxJitSize() {
 
 int getDeviceCount() { return DeviceManager::NUM_DEVICES; }
 
+void init() {
+    thread_local const auto& instance = DeviceManager::getInstance();
+    UNUSED(instance);
+}
+
 // Get the currently active device id
-int getActiveDeviceId() { return DeviceManager::ACTIVE_DEVICE_ID; }
+unsigned getActiveDeviceId() { return DeviceManager::ACTIVE_DEVICE_ID; }
 
 size_t getDeviceMemorySize(int device) {
     UNUSED(device);
@@ -149,9 +151,25 @@ bool& evalFlag() {
     return flag;
 }
 
-MemoryManager& memoryManager() {
+MemoryManagerBase& memoryManager() {
     DeviceManager& inst = DeviceManager::getInstance();
     return *(inst.memManager);
+}
+
+void setMemoryManager(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManager(move(mgr));
+}
+
+void resetMemoryManager() {
+    return DeviceManager::getInstance().resetMemoryManager();
+}
+
+void setMemoryManagerPinned(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManagerPinned(move(mgr));
+}
+
+void resetMemoryManagerPinned() {
+    return DeviceManager::getInstance().resetMemoryManagerPinned();
 }
 
 graphics::ForgeManager& forgeManager() {

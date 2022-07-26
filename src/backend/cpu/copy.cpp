@@ -23,13 +23,15 @@
 #include <cstdio>
 #include <cstring>
 
-using common::half;
+using common::half;  // NOLINT(misc-unused-using-decls) bug in clang-tidy
 using common::is_complex;
 
 namespace cpu {
 
 template<typename T>
 void copyData(T *to, const Array<T> &from) {
+    if (from.elements() == 0) { return; }
+
     from.eval();
     // Ensure all operations on 'from' are complete before copying data to host.
     getQueue().sync();
@@ -46,7 +48,7 @@ void copyData(T *to, const Array<T> &from) {
 template<typename T>
 Array<T> copyArray(const Array<T> &A) {
     Array<T> out = createEmptyArray<T>(A.dims());
-    getQueue().enqueue(kernel::copy<T, T>, out, A);
+    if (A.elements() > 0) { getQueue().enqueue(kernel::copy<T, T>, out, A); }
     return out;
 }
 

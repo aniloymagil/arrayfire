@@ -9,13 +9,11 @@
 
 #include <Param.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
-#include <nvrtc/cache.hpp>
 #include <nvrtc_kernel_headers/approx1_cuh.hpp>
 #include <nvrtc_kernel_headers/approx2_cuh.hpp>
 #include <af/defines.h>
-
-#include <string>
 
 namespace cuda {
 namespace kernel {
@@ -29,11 +27,10 @@ template<typename Ty, typename Tp>
 void approx1(Param<Ty> yo, CParam<Ty> yi, CParam<Tp> xo, const int xdim,
              const Tp &xi_beg, const Tp &xi_step, const float offGrid,
              const af::interpType method, const int order) {
-    static const std::string source(approx1_cuh, approx1_cuh_len);
-
-    auto approx1 = getKernel(
-        "cuda::approx1", source,
-        {TemplateTypename<Ty>(), TemplateTypename<Tp>(), TemplateArg(order)});
+    auto approx1 =
+        common::getKernel("cuda::approx1", {approx1_cuh_src},
+                          {TemplateTypename<Ty>(), TemplateTypename<Tp>(),
+                           TemplateArg(xdim), TemplateArg(order)});
 
     dim3 threads(THREADS, 1, 1);
     int blocksPerMat = divup(yo.dims[0], threads.x);
@@ -48,7 +45,7 @@ void approx1(Param<Ty> yo, CParam<Ty> yi, CParam<Tp> xo, const int xdim,
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
 
-    approx1(qArgs, yo, yi, xo, xdim, xi_beg, xi_step, offGrid, blocksPerMat,
+    approx1(qArgs, yo, yi, xo, xi_beg, Tp(1) / xi_step, offGrid, blocksPerMat,
             batch, method);
 
     POST_LAUNCH_CHECK();
@@ -59,11 +56,10 @@ void approx2(Param<Ty> zo, CParam<Ty> zi, CParam<Tp> xo, const int xdim,
              const Tp &xi_beg, const Tp &xi_step, CParam<Tp> yo, const int ydim,
              const Tp &yi_beg, const Tp &yi_step, const float offGrid,
              const af::interpType method, const int order) {
-    static const std::string source(approx2_cuh, approx2_cuh_len);
-
-    auto approx2 = getKernel(
-        "cuda::approx2", source,
-        {TemplateTypename<Ty>(), TemplateTypename<Tp>(), TemplateArg(order)});
+    auto approx2 = common::getKernel(
+        "cuda::approx2", {approx2_cuh_src},
+        {TemplateTypename<Ty>(), TemplateTypename<Tp>(), TemplateArg(xdim),
+         TemplateArg(ydim), TemplateArg(order)});
 
     dim3 threads(TX, TY, 1);
     int blocksPerMatX = divup(zo.dims[0], threads.x);
@@ -79,8 +75,9 @@ void approx2(Param<Ty> zo, CParam<Ty> zi, CParam<Tp> xo, const int xdim,
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
 
-    approx2(qArgs, zo, zi, xo, xdim, xi_beg, xi_step, yo, ydim, yi_beg, yi_step,
-            offGrid, blocksPerMatX, blocksPerMatY, batch, method);
+    approx2(qArgs, zo, zi, xo, xi_beg, Tp(1) / xi_step, yo, yi_beg,
+            Tp(1) / yi_step, offGrid, blocksPerMatX, blocksPerMatY, batch,
+            method);
 
     POST_LAUNCH_CHECK();
 }

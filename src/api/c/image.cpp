@@ -14,8 +14,8 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
 #include <common/ArrayInfo.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <common/graphics_common.hpp>
 #include <handle.hpp>
@@ -27,8 +27,16 @@
 #include <limits>
 
 using af::dim4;
-using namespace detail;
-using namespace graphics;
+using common::cast;
+using detail::arithOp;
+using detail::Array;
+using detail::copy_image;
+using detail::createValueArray;
+using detail::forgeManager;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
+using graphics::ForgeManager;
 
 template<typename T>
 Array<T> normalizePerType(const Array<T>& in) {
@@ -58,10 +66,10 @@ static fg_image convert_and_copy_image(const af_array in) {
     ForgeManager& fgMngr = forgeManager();
 
     // The inDims[2] * 100 is a hack to convert to fg_channel_format
-    // TODO Write a proper conversion function
-    fg_image ret_val =
-        fgMngr.getImage(inDims[1], inDims[0],
-                        (fg_channel_format)(inDims[2] * 100), getGLType<T>());
+    // TODO(pradeep): Write a proper conversion function
+    fg_image ret_val = fgMngr.getImage(
+        inDims[1], inDims[0], static_cast<fg_channel_format>(inDims[2] * 100),
+        getGLType<T>());
     copy_image<T>(normalizePerType<T>(imgData), ret_val);
 
     return ret_val;

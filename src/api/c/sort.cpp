@@ -22,7 +22,15 @@
 #include <cstdio>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 template<typename T>
 static inline af_array sort(const af_array in, const unsigned dim,
@@ -185,8 +193,6 @@ void sort_by_key_tmplt(af_array *okey, af_array *oval, const af_array ikey,
             break;
         default: TYPE_ERROR(1, vtype);
     }
-
-    return;
 }
 
 af_err af_sort_by_key(af_array *out_keys, af_array *out_values,

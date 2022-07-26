@@ -9,11 +9,23 @@
 
 #if AF_BORDER_TYPE == AF_PAD_SYM
 
+int trimIndex(int idx, const int len) {
+    int ret_val = idx;
+    int offset  = abs(ret_val) % len;
+    if (ret_val < 0) {
+        int offset = (abs(ret_val) - 1) % len;
+        ret_val    = offset;
+    } else if (ret_val >= len) {
+        int offset = abs(ret_val) % len;
+        ret_val    = len - offset - 1;
+    }
+    return ret_val;
+}
+
+// TODO(Pradeep) move trimindex from all locations into
+//              a single header after opencl cache is cleaned up
 int idxByndEdge(const int i, const int lb, const int len) {
-    if (i < lb || i >= (lb + len)) {
-        return (len - 1) - ((i - lb) % len);
-    } else
-        return i - lb;
+    return trimIndex(i - lb, len);
 }
 
 #elif AF_BORDER_TYPE == AF_PAD_CLAMP_TO_EDGE
@@ -22,13 +34,21 @@ int idxByndEdge(const int i, const int lb, const int len) {
     return clamp(i - lb, 0, len - 1);
 }
 
+#elif AF_BORDER_TYPE == AF_PAD_PERIODIC
+
+int idxByndEdge(const int i, const int lb, const int len) {
+    int rem  = (i - lb) % len;
+    int cond = rem < 0;
+    return cond * (rem + len) + (1 - cond) * rem;
+}
+
 #else
 
 #define DEFAULT_BORDER
 
 #endif
 
-__kernel void padBorders(__global T* out, KParam oInfo, __global const T* in,
+kernel void padBorders(global T* out, KParam oInfo, __global const T* in,
                          KParam iInfo, int l0, int l1, int l2, int l3,
                          unsigned blk_x, unsigned blk_y) {
     const int lx = get_local_id(0);
@@ -50,8 +70,8 @@ __kernel void padBorders(__global T* out, KParam oInfo, __global const T* in,
     const int s2 = iInfo.strides[2];
     const int s3 = iInfo.strides[3];
 
-    __global const T* src = in + iInfo.offset;
-    __global T* dst       = out;
+    global const T* src = in + iInfo.offset;
+    global T* dst       = out;
 
     bool isNotPadding =
         (l >= l3 && l < (d3 + l3)) && (k >= l2 && k < (d2 + l2)) &&

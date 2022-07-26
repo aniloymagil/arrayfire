@@ -9,6 +9,7 @@
 
 #include <arrayfire.h>
 #include <gtest/gtest.h>
+#include <half.hpp>
 #include <testHelpers.hpp>
 #include <af/dim4.hpp>
 #include <af/traits.hpp>
@@ -24,6 +25,7 @@ using af::cfloat;
 using af::constant;
 using af::dim4;
 using af::randu;
+using half_float::half;
 using std::endl;
 using std::string;
 using std::vector;
@@ -35,8 +37,10 @@ class Mean : public ::testing::Test {
 };
 
 // create a list of types to be tested
+// This list does not allow to cleanly add the af_half/half_float type : at the
+// moment half tested in some special unittests
 typedef ::testing::Types<cdouble, cfloat, float, double, int, uint, intl, uintl,
-                         char, uchar, short, ushort>
+                         char, uchar, short, ushort, half_float::half>
     TestTypes;
 
 // register the type list
@@ -78,12 +82,16 @@ void meanDimTest(string pFileName, dim_t dim, bool isWeighted = false) {
     SUPPORTED_TYPE_CHECK(T);
     SUPPORTED_TYPE_CHECK(outType);
 
+    double tol = 1.0e-3;
+    if ((af_dtype)af::dtype_traits<T>::af_type == f16) tol = 4.e-3;
     vector<dim4> numDims;
     vector<vector<int> > in;
     vector<vector<float> > tests;
 
     readTestsFromFile<int, float>(pFileName, numDims, in, tests);
 
+    dim4 goldDims = numDims[0];
+    goldDims[dim] = 1;
     if (!isWeighted) {
         dim4 dims = numDims[0];
         vector<T> input(in[0].begin(), in[0].end());
@@ -97,22 +105,16 @@ void meanDimTest(string pFileName, dim_t dim, bool isWeighted = false) {
         outArray.host((void*)outData.data());
 
         vector<outType> currGoldBar(tests[0].begin(), tests[0].end());
-        size_t nElems = currGoldBar.size();
-        for (size_t elIter = 0; elIter < nElems; ++elIter) {
-            ASSERT_NEAR(::real(currGoldBar[elIter]), ::real(outData[elIter]),
-                        1.0e-3)
-                << "at: " << elIter << endl;
-            ASSERT_NEAR(::imag(currGoldBar[elIter]), ::imag(outData[elIter]),
-                        1.0e-3)
-                << "at: " << elIter << endl;
-        }
+
+        dim4 goldDims = dims;
+        goldDims[dim] = 1;
+        ASSERT_VEC_ARRAY_NEAR(currGoldBar, goldDims, outArray, tol);
     } else {
         dim4 dims  = numDims[0];
         dim4 wdims = numDims[1];
         vector<T> input(in[0].begin(), in[0].end());
         vector<float> weights(in[1].size());
-        transform(in[1].begin(), in[1].end(),
-                  weights.begin(),
+        transform(in[1].begin(), in[1].end(), weights.begin(),
                   convert_to<float, int>);
 
         array inArray(dims, &(input.front()));
@@ -125,15 +127,8 @@ void meanDimTest(string pFileName, dim_t dim, bool isWeighted = false) {
         outArray.host((void*)outData.data());
 
         vector<outType> currGoldBar(tests[0].begin(), tests[0].end());
-        size_t nElems = currGoldBar.size();
-        for (size_t elIter = 0; elIter < nElems; ++elIter) {
-            ASSERT_NEAR(::real(currGoldBar[elIter]), ::real(outData[elIter]),
-                        1.0e-3)
-                << "at: " << elIter << endl;
-            ASSERT_NEAR(::imag(currGoldBar[elIter]), ::imag(outData[elIter]),
-                        1.0e-3)
-                << "at: " << elIter << endl;
-        }
+
+        ASSERT_VEC_ARRAY_NEAR(currGoldBar, goldDims, outArray, tol);
     }
 }
 
@@ -176,6 +171,7 @@ TYPED_TEST(Mean, Wtd_Dim1Matrix) {
 template<typename T>
 void meanAllTest(T const_value, dim4 dims) {
     typedef typename meanOutType<T>::type outType;
+
     SUPPORTED_TYPE_CHECK(T);
     SUPPORTED_TYPE_CHECK(outType);
 
@@ -196,9 +192,37 @@ void meanAllTest(T const_value, dim4 dims) {
     ASSERT_NEAR(::imag(output), ::imag(gold), 1.0e-3);
 }
 
+template<>
+void meanAllTest(half_float::half const_value, dim4 dims) {
+    SUPPORTED_TYPE_CHECK(half_float::half);
+
+    using af::array;
+    using af::mean;
+
+    vector<float> hundred(dims.elements(), const_value);
+
+    float gold = float(0);
+    for (int i = 0; i < (int)hundred.size(); i++) { gold = gold + hundred[i]; }
+    gold = gold / dims.elements();
+
+    array a         = array(dims, &(hundred.front())).as(f16);
+    half output     = mean<half>(a);
+    af_half output2 = mean<af_half>(a);
+
+    // make sure output2 and output are binary equals. This is necessary
+    // because af_half is not a complete type
+    half output2_copy;
+    memcpy(static_cast<void*>(&output2_copy), &output2, sizeof(af_half));
+    ASSERT_EQ(output, output2_copy);
+
+    ASSERT_NEAR(output, gold, 1.0e-3);
+}
+
 TEST(MeanAll, f64) { meanAllTest<double>(2.1, dim4(10, 10, 1, 1)); }
 
 TEST(MeanAll, f32) { meanAllTest<float>(2.1f, dim4(10, 5, 2, 1)); }
+
+TEST(MeanAll, f16) { meanAllTest<half>((half)0.3f, dim4(10, 5, 2, 1)); }
 
 TEST(MeanAll, s32) { meanAllTest<int>(2, dim4(5, 5, 2, 2)); }
 
@@ -219,6 +243,14 @@ TEST(MeanAll, c64) { meanAllTest<cdouble>(cdouble(2.1), dim4(10, 10, 1, 1)); }
 template<typename T>
 T random() {
     return T(std::rand() % 10);
+}
+
+template<>
+half random<half>() {
+    // create values from -0.5 to 0.5 to ensure sum does not deviate
+    // too far out of half's useful range
+    float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) - 0.5f;
+    return half(r);
 }
 
 template<>
@@ -266,7 +298,7 @@ void weightedMeanAllTest(dim4 dims) {
         wtsSum = wtsSum + wts[i];
     }
 
-    outType gold = wtdSum / wtsSum;
+    outType gold = wtdSum / outType(wtsSum);
 
     array a(dims, &(data.front()));
     array w(dims, &(wts.front()));
@@ -320,9 +352,9 @@ TEST(Mean, Issue2093) {
 }
 
 TEST(MeanAll, SubArray) {
-    //Fixes Issue 2636
-    using af::span;
+    // Fixes Issue 2636
     using af::mean;
+    using af::span;
     using af::sum;
 
     const dim4 inDims(10, 10, 10, 10);
@@ -330,6 +362,20 @@ TEST(MeanAll, SubArray) {
     array in  = randu(inDims);
     array sub = in(0, span, span, span);
 
-    size_t nElems = sub.elements();
-    ASSERT_FLOAT_EQ(mean<float>(sub), sum<float>(sub)/nElems);
+    size_t nElems   = sub.elements();
+    float max_error = std::numeric_limits<float>::epsilon() * nElems;
+    ASSERT_NEAR(mean<float>(sub), sum<float>(sub) / nElems, max_error);
+}
+
+TEST(MeanHalf, dim0) {
+    SUPPORTED_TYPE_CHECK(half_float::half);
+    // Keeping N low to be able to run on 6GB GPUs
+    int N = 1024;
+    const dim4 inDims(N, N, 1, 1);
+    array in  = randu(inDims, f16);
+    array m16 = af::mean(in, 0);
+    array m32 = af::mean(in.as(f32), 0);
+    // Some diffs appears at 0.0001 max diff : example: float: 0.507014 vs half:
+    // 0.506836
+    ASSERT_ARRAYS_NEAR(m16.as(f32), m32, 0.001f);
 }

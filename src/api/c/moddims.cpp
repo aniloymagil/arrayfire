@@ -10,6 +10,7 @@
 #include <backend.hpp>
 #include <common/err_common.hpp>
 #include <common/half.hpp>
+#include <common/moddims.hpp>
 #include <copy.hpp>
 #include <handle.hpp>
 #include <af/data.h>
@@ -18,16 +19,22 @@
 
 using af::dim4;
 using common::half;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 namespace {
 template<typename T>
 af_array modDims(const af_array in, const dim4& newDims) {
-    return getHandle(::modDims(getArray<T>(in), newDims));
+    return getHandle(common::modDims(getArray<T>(in), newDims));
 }
 template<typename T>
 af_array flat(const af_array in) {
-    return getHandle(::flat(getArray<T>(in)));
+    return getHandle(common::flat(getArray<T>(in)));
 }
 }  // namespace
 

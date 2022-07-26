@@ -7,12 +7,13 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 #include <arrayfire.h>
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
 #include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
+#include <iomanip>
 
 using namespace af;
 using std::vector;
@@ -20,11 +21,9 @@ using std::vector;
 template<typename T>
 class Array : public ::testing::Test {};
 
-template<typename T>
-using ArrayDeathTest = Array<T>;
-
 typedef ::testing::Types<float, double, cfloat, cdouble, char, unsigned char,
-                         int, uint, intl, uintl, short, ushort>
+                         int, uint, intl, uintl, short, ushort,
+                         half_float::half>
     TestTypes;
 
 TYPED_TEST_CASE(Array, TestTypes);
@@ -127,7 +126,7 @@ TYPED_TEST(Array, ConstructorHostPointer1D) {
 
     dtype type    = (dtype)dtype_traits<TypeParam>::af_type;
     size_t nelems = 10;
-    vector<TypeParam> data(nelems, 4);
+    vector<TypeParam> data(nelems, TypeParam(4));
     array a(nelems, &data.front(), afHost);
     EXPECT_EQ(1u, a.numdims());
     EXPECT_EQ(dim_t(nelems), a.dims(0));
@@ -149,7 +148,7 @@ TYPED_TEST(Array, ConstructorHostPointer2D) {
     size_t ndims    = 2;
     size_t dim_size = 10;
     size_t nelems   = dim_size * dim_size;
-    vector<TypeParam> data(nelems, 4);
+    vector<TypeParam> data(nelems, TypeParam(4));
     array a(dim_size, dim_size, &data.front(), afHost);
     EXPECT_EQ(ndims, a.numdims());
     EXPECT_EQ(dim_t(dim_size), a.dims(0));
@@ -171,7 +170,7 @@ TYPED_TEST(Array, ConstructorHostPointer3D) {
     size_t ndims    = 3;
     size_t dim_size = 10;
     size_t nelems   = dim_size * dim_size * dim_size;
-    vector<TypeParam> data(nelems, 4);
+    vector<TypeParam> data(nelems, TypeParam(4));
     array a(dim_size, dim_size, dim_size, &data.front(), afHost);
     EXPECT_EQ(ndims, a.numdims());
     EXPECT_EQ(dim_t(dim_size), a.dims(0));
@@ -193,7 +192,7 @@ TYPED_TEST(Array, ConstructorHostPointer4D) {
     size_t ndims    = 4;
     size_t dim_size = 10;
     size_t nelems   = dim_size * dim_size * dim_size * dim_size;
-    vector<TypeParam> data(nelems, 4);
+    vector<TypeParam> data(nelems, TypeParam(4));
     array a(dim_size, dim_size, dim_size, dim_size, &data.front(), afHost);
     EXPECT_EQ(ndims, a.numdims());
     EXPECT_EQ(dim_t(dim_size), a.dims(0));
@@ -223,6 +222,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
 
         case f64:
@@ -234,6 +234,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case c32:
             EXPECT_TRUE(one.isfloating());
@@ -244,6 +245,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_FALSE(one.isreal());
             EXPECT_TRUE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case c64:
             EXPECT_TRUE(one.isfloating());
@@ -254,6 +256,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_FALSE(one.isreal());
             EXPECT_TRUE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case s32:
             EXPECT_FALSE(one.isfloating());
@@ -264,6 +267,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case u32:
             EXPECT_FALSE(one.isfloating());
@@ -274,6 +278,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case s16:
             EXPECT_FALSE(one.isfloating());
@@ -284,6 +289,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case u16:
             EXPECT_FALSE(one.isfloating());
@@ -294,6 +300,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case u8:
             EXPECT_FALSE(one.isfloating());
@@ -304,6 +311,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case b8:
             EXPECT_FALSE(one.isfloating());
@@ -314,6 +322,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_TRUE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case s64:
             EXPECT_FALSE(one.isfloating());
@@ -324,6 +333,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case u64:
             EXPECT_FALSE(one.isfloating());
@@ -334,6 +344,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
+            EXPECT_FALSE(one.ishalf());
             break;
         case f16:
             EXPECT_TRUE(one.isfloating());
@@ -344,7 +355,7 @@ TYPED_TEST(Array, TypeAttributes) {
             EXPECT_TRUE(one.isreal());
             EXPECT_FALSE(one.iscomplex());
             EXPECT_FALSE(one.isbool());
-            EXPECT_FALSE(one.ishalf());
+            EXPECT_TRUE(one.ishalf());
             break;
     }
 }
@@ -518,36 +529,131 @@ TEST(Array, ScalarTypeMismatch) {
     EXPECT_THROW(a.scalar<int>(), exception);
 }
 
-void deathTest() {
-    info();
-    setDevice(0);
+TEST(Array, CopyListInitializerList) {
+    int h_buffer[] = {23, 34, 18, 99, 34};
 
-    array A = randu(5, 3, f32);
+    array A(5, h_buffer);
+    array B({23, 34, 18, 99, 34});
 
-    array B = sin(A) + 1.5;
-
-    B(seq(0, 2), 1) = B(seq(0, 2), 1) * -1;
-
-    array C = fft(B);
-
-    array c = C.row(end);
-
-    dim4 dims(16, 4, 1, 1);
-    array r = constant(2, dims);
-
-    array S = scan(r, 0, AF_BINARY_MUL);
-
-    float d[] = {1, 2, 3, 4, 5, 6};
-    array D(2, 3, d, afHost);
-
-    D.col(0) = D.col(end);
-
-    array vals, inds;
-    sort(vals, inds, A);
-
-    _exit(0);
+    ASSERT_ARRAYS_EQ(A, B);
 }
 
-TEST(ArrayDeathTest, ProxyMoveAssignmentOperator) {
-    EXPECT_EXIT(deathTest(), ::testing::ExitedWithCode(0), "");
+TEST(Array, DirectListInitializerList2) {
+    int h_buffer[] = {23, 34, 18, 99, 34};
+
+    array A(5, h_buffer);
+    array B{23, 34, 18, 99, 34};
+
+    ASSERT_ARRAYS_EQ(A, B);
+}
+
+TEST(Array, CopyListInitializerListAndDim4) {
+    int h_buffer[] = {23, 34, 18, 99, 34, 44};
+
+    array A(2, 3, h_buffer);
+    array B(dim4(2, 3), {23, 34, 18, 99, 34, 44});
+
+    ASSERT_ARRAYS_EQ(A, B);
+}
+
+TEST(Array, DirectListInitializerListAndDim4) {
+    int h_buffer[] = {23, 34, 18, 99, 34, 44};
+
+    array A(2, 3, h_buffer);
+    array B{dim4(2, 3), {23, 34, 18, 99, 34, 44}};
+
+    ASSERT_ARRAYS_EQ(A, B);
+}
+
+TEST(Array, CopyListInitializerListAssignment) {
+    int h_buffer[] = {23, 34, 18, 99, 34};
+
+    array A(5, h_buffer);
+    array B = {23, 34, 18, 99, 34};
+
+    ASSERT_ARRAYS_EQ(A, B);
+}
+
+TEST(Array, CopyListInitializerListDim4Assignment) {
+    int h_buffer[] = {23, 34, 18, 99, 34, 44};
+
+    array A(2, 3, h_buffer);
+    array B = {dim4(2, 3), {23, 34, 18, 99, 34, 44}};
+
+    ASSERT_ARRAYS_EQ(A, B);
+}
+
+TEST(Array, EmptyArrayHostCopy) {
+    af::array empty;
+    std::vector<float> hdata(100);
+    empty.host(hdata.data());
+    SUCCEED();
+}
+
+TEST(Array, ReferenceCount1) {
+    int counta = 0, countb = 0, countc = 0;
+    array a = af::randu(10, 10);
+    a.eval();
+    af::sync();
+    {
+        ASSERT_REF(a, 1) << "After a = randu(10, 10);";
+
+        array b = af::randu(10, 10);  //(af::seq(100));
+        ASSERT_REF(b, 1) << "After b = randu(10, 10);";
+
+        array c = a + b;
+        ASSERT_REF(a, 2) << "After c = a + b;";
+        ASSERT_REF(b, 2) << "After c = a + b;";
+        ASSERT_REF(c, 0) << "After c = a + b;";
+
+        c.eval();
+        af::sync();
+        ASSERT_REF(a, 1) << "After c.eval();";
+        ASSERT_REF(b, 1) << "After c.eval();";
+        ASSERT_REF(c, 1) << "After c.eval();";
+    }
+}
+
+TEST(Array, ReferenceCount2) {
+    int counta = 0, countb = 0, countc = 0;
+    array a = af::randu(10, 10);
+    array b = af::randu(10, 10);
+    {
+        ASSERT_REF(a, 1) << "After a = randu(10, 10);";
+        ASSERT_REF(b, 1) << "After a = randu(10, 10);";
+
+        array c = a + b;
+
+        ASSERT_REF(a, 2) << "After c = a + b;";
+        ASSERT_REF(b, 2) << "After c = a + b;";
+        ASSERT_REF(c, 0) << "After c = a + b;";
+
+        array d = c;
+
+        ASSERT_REF(a, 2) << "After d = c;";
+        ASSERT_REF(b, 2) << "After d = c;";
+        ASSERT_REF(c, 0) << "After d = c;";
+        ASSERT_REF(d, 0) << "After d = c;";
+    }
+}
+
+// This tests situations where the compiler incorrectly assumes the
+// initializer list constructor instead of the regular constructor when
+// using the uniform initilization syntax
+TEST(Array, InitializerListFixAFArray) {
+    af::array a = randu(1);
+    af::array b{a};
+
+    ASSERT_ARRAYS_EQ(a, b);
+}
+
+// This tests situations where the compiler incorrectly assumes the
+// initializer list constructor instead of the regular constructor when
+// using the uniform initilization syntax
+TEST(Array, InitializerListFixDim4) {
+    af::array a        = randu(1);
+    vector<float> data = {3.14f, 3.14f, 3.14f, 3.14f, 3.14f,
+                          3.14f, 3.14f, 3.14f, 3.14f};
+    af::array b{dim4(3, 3), data.data()};
+    ASSERT_ARRAYS_EQ(constant(3.14, 3, 3), b);
 }

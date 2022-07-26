@@ -7,12 +7,18 @@
 
 include(InternalUtils)
 
+generate_product_version(af_cpu_ver_res_file
+  FILE_NAME "afcpu"
+  FILE_DESCRIPTION "CPU Backend Dynamic-link library"
+)
+
 add_library(afcpu "")
 add_library(ArrayFire::afcpu ALIAS afcpu)
 
 # CPU backend source files
 target_sources(afcpu
   PRIVATE
+    $<$<PLATFORM_ID:Windows>:${af_cpu_ver_res_file}>
     Array.cpp
     Array.hpp
     anisotropic_diffusion.cpp
@@ -23,6 +29,7 @@ target_sources(afcpu
     assign.cpp
     assign.hpp
     backend.hpp
+    binary.hpp
     bilateral.cpp
     bilateral.hpp
     blas.cpp
@@ -54,6 +61,8 @@ target_sources(afcpu
     fft.hpp
     fftconvolve.cpp
     fftconvolve.hpp
+    flood_fill.hpp
+    flood_fill.cpp
     gradient.cpp
     gradient.hpp
     harris.cpp
@@ -108,7 +117,6 @@ target_sources(afcpu
     nearest_neighbour.hpp
     orb.cpp
     orb.hpp
-    padarray.cpp
     ParamIterator.hpp
     platform.cpp
     platform.hpp
@@ -130,6 +138,7 @@ target_sources(afcpu
     reorder.hpp
     resize.cpp
     resize.hpp
+    reshape.cpp
     rotate.cpp
     rotate.hpp
     scan.cpp
@@ -207,6 +216,7 @@ target_sources(afcpu
     kernel/exampleFunction.hpp
     kernel/fast.hpp
     kernel/fftconvolve.hpp
+    kernel/flood_fill.hpp
     kernel/gradient.hpp
     kernel/harris.hpp
     kernel/histogram.hpp
@@ -242,6 +252,7 @@ target_sources(afcpu
     kernel/scan_by_key.hpp
     kernel/select.hpp
     kernel/shift.hpp
+    kernel/sift.hpp
     kernel/sobel.hpp
     kernel/sort.hpp
     kernel/sort_by_key.hpp
@@ -261,20 +272,20 @@ if (AF_WITH_CPUID)
   target_compile_definitions(afcpu PRIVATE -DAF_WITH_CPUID)
 endif(AF_WITH_CPUID)
 
+af_dep_check_and_populate(${threads_prefix}
+  URI https://github.com/arrayfire/threads.git
+  REF b666773940269179f19ef11c8f1eb77005e85d9a
+)
+
 target_sources(afcpu
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/threads/async_queue.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/threads/event.hpp
+    ${${threads_prefix}_SOURCE_DIR}/include/threads/async_queue.hpp
+    ${${threads_prefix}_SOURCE_DIR}/include/threads/event.hpp
   )
 
 arrayfire_set_default_cxx_flags(afcpu)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/kernel/sort_by_key/CMakeLists.txt")
-
-if(AF_WITH_NONFREE)
-  target_sources(afcpu PRIVATE kernel/sift_nonfree.hpp)
-  target_compile_definitions(afcpu PRIVATE AF_WITH_NONFREE_SIFT)
-endif()
 
 target_include_directories(afcpu
   PUBLIC
@@ -283,73 +294,54 @@ target_include_directories(afcpu
     $<INSTALL_INTERFACE:${AF_INSTALL_INC_DIR}>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    threads
+    ${${threads_prefix}_SOURCE_DIR}/include
     ${CBLAS_INCLUDE_DIR}
   )
-
-# TODO(umar) Find a better way to determine BLAS selection
-if(USE_CPU_MKL)
-  dependency_check(MKL_FOUND "MKL not found")
-  target_compile_definitions(afcpu PRIVATE USE_MKL)
-
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
-    (CMAKE_CXX_COMPILER_ID STREQUAL "Intel" AND (UNIX AND NOT APPLE)))
-    # MKL requires multiple passes when linking with the static libs. This can be
-    # done in CMake using LINK_INTERFACE_MULTIPLICITY but that will require
-    # changine the way FindCBLAS works. This can also be done using the
-    # --start-group and --end-group linker around the libraries in the linking
-    # step.
-    #
-    # TODO(umar): Change the way CBLAS libraries are found and linked
-    set(CBLAS_LIBRARIES -Wl,--start-group ${CBLAS_LIBRARIES} -Wl,--end-group)
-  endif()
-endif()
 
 target_compile_definitions(afcpu
   PRIVATE
     AF_CPU
   )
 
-if(USE_CPU_MKL)
-  target_link_libraries(afcpu
-    PRIVATE
-      c_api_interface
-      cpp_api_interface
-      afcommon_interface
-      cpu_sort_by_key
-      MKL::MKL
-      Threads::Threads
-    )
-else()
-  dependency_check(FFTW_FOUND "FFTW not found")
-  dependency_check(CBLAS_FOUND "CBLAS not found")
+target_link_libraries(afcpu
+  PRIVATE
+    c_api_interface
+    cpp_api_interface
+    afcommon_interface
+    cpu_sort_by_key
+    Threads::Threads
+  )
+if(BUILD_WITH_MKL)
+  target_compile_definitions(afcpu PRIVATE USE_MKL)
 
+  if(MKL_BATCH)
+    target_compile_definitions(afcpu PRIVATE AF_USE_MKL_BATCH)
+  endif()
+
+  if(AF_WITH_STATIC_MKL)
+      target_link_libraries(afcpu PRIVATE MKL::Static)
+      target_compile_definitions(afcpu PRIVATE USE_STATIC_MKL)
+  else()
+      target_link_libraries(afcpu PRIVATE MKL::RT)
+  endif()
+else()
   target_link_libraries(afcpu
     PRIVATE
-      c_api_interface
-      cpp_api_interface
-      afcommon_interface
-      cpu_sort_by_key
       ${CBLAS_LIBRARIES}
       FFTW::FFTW
       FFTW::FFTWF
-      Threads::Threads
     )
   if(LAPACK_FOUND)
-    target_link_libraries(afcpu
-      PRIVATE
-        ${LAPACK_LIBRARIES})
-    target_include_directories(afcpu
-      PRIVATE
-        ${LAPACK_INCLUDE_DIR})
+    target_link_libraries(afcpu PRIVATE ${LAPACK_LIBRARIES})
+    target_include_directories(afcpu PRIVATE ${LAPACK_INCLUDE_DIR})
   endif()
 endif()
 
-if(LAPACK_FOUND OR MKL_FOUND)
-  target_compile_definitions(afcpu
-    PRIVATE
-      WITH_LINEAR_ALGEBRA)
+if(LAPACK_FOUND OR BUILD_WITH_MKL)
+  target_compile_definitions(afcpu PRIVATE WITH_LINEAR_ALGEBRA)
 endif()
+
+af_split_debug_info(afcpu ${AF_INSTALL_LIB_DIR})
 
 install(TARGETS afcpu
   EXPORT ArrayFireCPUTargets

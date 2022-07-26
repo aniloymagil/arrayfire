@@ -20,15 +20,21 @@
 #include <vector>
 
 using af::dim4;
-using namespace detail;
+using detail::arithOp;
+using detail::Array;
+using detail::createEmptyArray;
+using detail::createHostDataArray;
+using detail::createSubArray;
+using detail::scalar;
 
 template<typename T>
 Array<T> multiplyIndexed(const Array<T> &lhs, const Array<T> &rhs,
                          std::vector<af_seq> idx) {
     Array<T> rhs_sub = createSubArray(rhs, idx);
-    Array<T> out     = createEmptyArray<T>(dim4(lhs.dims()[0], rhs_sub.dims()[1], lhs.dims()[2], lhs.dims()[3]));
+    Array<T> out     = createEmptyArray<T>(
+        dim4(lhs.dims()[0], rhs_sub.dims()[1], lhs.dims()[2], lhs.dims()[3]));
     T alpha = scalar<T>(1.0);
-    T beta = scalar<T>(0.0);
+    T beta  = scalar<T>(0.0);
     gemm(out, AF_MAT_NONE, AF_MAT_NONE, &alpha, lhs, rhs_sub, &beta);
     return out;
 }
@@ -37,8 +43,15 @@ template<typename T>
 static af_array transform_coordinates(const af_array &tf_, const float d0_,
                                       const float d1_) {
     af::dim4 h_dims(4, 3);
-    T h_in[4 * 3] = {(T)0,   (T)0, (T)d1_, (T)d1_, (T)0, (T)d0_,
-                     (T)d0_, (T)0, (T)1,   (T)1,   (T)1, (T)1};
+    T zero = 0;
+    T one  = 1;
+    T d0   = static_cast<T>(d0_);
+    T d1   = static_cast<T>(d1_);
+    // clang-format off
+    T h_in[4 * 3] = {zero, zero,  d1,   d1,
+                     zero,   d0,  d0, zero,
+                      one,  one, one,  one};
+    // clang-format on
 
     const Array<T> tf = getArray<T>(tf_);
     Array<T> in       = createHostDataArray<T>(h_dims, h_in);

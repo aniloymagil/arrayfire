@@ -7,8 +7,9 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <Array.hpp>
 #include <convolve.hpp>
+
+#include <Array.hpp>
 #include <err_opencl.hpp>
 #include <kernel/convolve_separable.hpp>
 #include <af/dim4.hpp>
@@ -17,26 +18,26 @@ using af::dim4;
 
 namespace opencl {
 
-template<typename T, typename accT, bool expand>
+template<typename T, typename accT>
 Array<T> convolve2(Array<T> const& signal, Array<accT> const& c_filter,
-                   Array<accT> const& r_filter) {
-    const dim_t cflen = (dim_t)c_filter.elements();
-    const dim_t rflen = (dim_t)r_filter.elements();
+                   Array<accT> const& r_filter, const bool expand) {
+    const auto cflen = c_filter.elements();
+    const auto rflen = r_filter.elements();
 
     if ((cflen > kernel::MAX_SCONV_FILTER_LEN) ||
         (rflen > kernel::MAX_SCONV_FILTER_LEN)) {
         // TODO call upon fft
         char errMessage[256];
         snprintf(errMessage, sizeof(errMessage),
-                 "\nOpenCL Separable convolution doesn't support %lld(coloumn) "
-                 "%lld(row) filters\n",
+                 "\nOpenCL Separable convolution doesn't support %llu(coloumn) "
+                 "%llu(row) filters\n",
                  cflen, rflen);
         OPENCL_NOT_SUPPORTED(errMessage);
     }
 
-    const dim4 sDims = signal.dims();
-    dim4 tDims       = sDims;
-    dim4 oDims       = sDims;
+    const dim4& sDims = signal.dims();
+    dim4 tDims        = sDims;
+    dim4 oDims        = sDims;
 
     if (expand) {
         tDims[0] += cflen - 1;
@@ -47,19 +48,15 @@ Array<T> convolve2(Array<T> const& signal, Array<accT> const& c_filter,
     Array<T> temp = createEmptyArray<T>(tDims);
     Array<T> out  = createEmptyArray<T>(oDims);
 
-    kernel::convSep<T, accT, 0, expand>(temp, signal, c_filter);
-    kernel::convSep<T, accT, 1, expand>(out, temp, r_filter);
+    kernel::convSep<T, accT>(temp, signal, c_filter, 0, expand);
+    kernel::convSep<T, accT>(out, temp, r_filter, 1, expand);
 
     return out;
 }
 
-#define INSTANTIATE(T, accT)                                                 \
-    template Array<T> convolve2<T, accT, true>(Array<T> const& signal,       \
-                                               Array<accT> const& c_filter,  \
-                                               Array<accT> const& r_filter); \
-    template Array<T> convolve2<T, accT, false>(Array<T> const& signal,      \
-                                                Array<accT> const& c_filter, \
-                                                Array<accT> const& r_filter);
+#define INSTANTIATE(T, accT)                                                  \
+    template Array<T> convolve2<T, accT>(Array<T> const&, Array<accT> const&, \
+                                         Array<accT> const&, const bool);
 
 INSTANTIATE(cdouble, cdouble)
 INSTANTIATE(cfloat, cfloat)

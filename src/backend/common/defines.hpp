@@ -9,6 +9,9 @@
 
 #pragma once
 
+#include <common/internal_enums.hpp>
+
+#include <mutex>
 #include <string>
 
 inline std::string clipFilePath(std::string path, std::string str) {
@@ -33,28 +36,16 @@ inline std::string clipFilePath(std::string path, std::string str) {
 #define STATIC_ static
 #define __AF_FILENAME__ (clipFilePath(__FILE__, "src\\").c_str())
 #else
-//#ifndef __PRETTY_FUNCTION__
-//    #define __PRETTY_FUNCTION__ __func__ // __PRETTY_FUNCTION__ Fallback
-//#endif
 #define STATIC_ inline
 #define __AF_FILENAME__ (clipFilePath(__FILE__, "src/").c_str())
 #endif
 
-typedef enum {
-    AF_BATCH_UNSUPPORTED = -1, /* invalid inputs */
-    AF_BATCH_NONE,             /* one signal, one filter   */
-    AF_BATCH_LHS,              /* many signal, one filter  */
-    AF_BATCH_RHS,              /* one signal, many filter  */
-    AF_BATCH_SAME,             /* signal and filter have same batch size */
-    AF_BATCH_DIFF,             /* signal and filter have different batch size */
-} AF_BATCH_KIND;
-
-enum class kJITHeuristics {
-    Pass                = 0, /* no eval necessary */
-    TreeHeight          = 1, /* eval due to jit tree height */
-    KernelParameterSize = 2, /* eval due to many kernel parameters */
-    MemoryPressure      = 3  /* eval due to memory pressure */
-};
+#if defined(NDEBUG)
+#define __AF_FUNC__ __FUNCTION__
+#else
+// Debug
+#define __AF_FUNC__ __PRETTY_FUNCTION__
+#endif
 
 #ifdef OS_WIN
 #include <Windows.h>
@@ -69,3 +60,12 @@ using LibHandle = void*;
 #else
 #error "Unsupported platform"
 #endif
+
+#ifndef AF_MEM_DEBUG
+#define AF_MEM_DEBUG 0
+#endif
+
+namespace common {
+using mutex_t      = std::mutex;
+using lock_guard_t = std::lock_guard<mutex_t>;
+}  // namespace common

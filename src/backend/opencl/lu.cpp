@@ -53,7 +53,7 @@ void lu(Array<T> &lower, Array<T> &upper, Array<int> &pivot,
     dim4 udims(MN, N);
     lower = createEmptyArray<T>(ldims);
     upper = createEmptyArray<T>(udims);
-    kernel::lu_split<T>(lower, upper, in_copy);
+    kernel::luSplit<T>(lower, upper, in_copy);
 }
 
 template<typename T>
@@ -71,7 +71,7 @@ Array<int> lu_inplace(Array<T> &in, const bool convert_pivot) {
     magma_getrf_gpu<T>(M, N, (*in_buf)(), in.getOffset(), in.strides()[1],
                        &ipiv[0], getQueue()(), &info);
 
-    if (!convert_pivot) return createHostDataArray<int>(dim4(MN), &ipiv[0]);
+    if (!convert_pivot) { return createHostDataArray<int>(dim4(MN), &ipiv[0]); }
 
     Array<int> pivot = convertPivot(&ipiv[0], MN, M);
     return pivot;

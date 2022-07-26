@@ -9,8 +9,9 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
+#include <common/half.hpp>
 #include <handle.hpp>
 #include <math.hpp>
 #include <mean.hpp>
@@ -21,30 +22,41 @@
 
 #include "stats.h"
 
-using namespace detail;
+using af::dim4;
+using common::half;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::imag;
+using detail::intl;
+using detail::mean;
+using detail::real;
+using detail::uchar;
+using detail::uintl;
+using detail::ushort;
 
 template<typename Ti, typename To>
 static To mean(const af_array &in) {
-    typedef typename baseOutType<To>::type Tw;
+    using Tw = typename baseOutType<To>::type;
     return mean<Ti, Tw, To>(getArray<Ti>(in));
 }
 
 template<typename T>
 static T mean(const af_array &in, const af_array &weights) {
-    typedef typename baseOutType<T>::type Tw;
+    using Tw = typename baseOutType<T>::type;
     return mean<T, Tw>(castArray<T>(in), castArray<Tw>(weights));
 }
 
 template<typename Ti, typename To>
 static af_array mean(const af_array &in, const dim_t dim) {
-    typedef typename baseOutType<To>::type Tw;
+    using Tw = typename baseOutType<To>::type;
     return getHandle<To>(mean<Ti, Tw, To>(getArray<Ti>(in), dim));
 }
 
 template<typename T>
 static af_array mean(const af_array &in, const af_array &weights,
                      const dim_t dim) {
-    typedef typename baseOutType<T>::type Tw;
+    using Tw = typename baseOutType<T>::type;
     return getHandle<T>(
         mean<T, Tw>(castArray<T>(in), castArray<Tw>(weights), dim));
 }
@@ -69,6 +81,7 @@ af_err af_mean(af_array *out, const af_array in, const dim_t dim) {
             case b8: output = mean<char, float>(in, dim); break;
             case c32: output = mean<cfloat, cfloat>(in, dim); break;
             case c64: output = mean<cdouble, cdouble>(in, dim); break;
+            case f16: output = mean<half, half>(in, dim); break;
             default: TYPE_ERROR(1, type);
         }
         std::swap(*out, output);
@@ -109,18 +122,19 @@ af_err af_mean_weighted(af_array *out, const af_array in,
         }
 
         switch (iType) {
-            case f64: output = mean<double>(in, w, dim); break;
-            case f32: output = mean<float>(in, w, dim); break;
-            case s32: output = mean<float>(in, w, dim); break;
-            case u32: output = mean<float>(in, w, dim); break;
-            case s64: output = mean<double>(in, w, dim); break;
-            case u64: output = mean<double>(in, w, dim); break;
-            case s16: output = mean<float>(in, w, dim); break;
-            case u16: output = mean<float>(in, w, dim); break;
-            case u8: output = mean<float>(in, w, dim); break;
+            case f32:
+            case s32:
+            case u32:
+            case s16:
+            case u16:
+            case u8:
             case b8: output = mean<float>(in, w, dim); break;
+            case f64:
+            case s64:
+            case u64: output = mean<double>(in, w, dim); break;
             case c32: output = mean<cfloat>(in, w, dim); break;
             case c64: output = mean<cdouble>(in, w, dim); break;
+            case f16: output = mean<half>(in, w, dim); break;
             default: TYPE_ERROR(1, iType);
         }
 
@@ -146,6 +160,7 @@ af_err af_mean_all(double *realVal, double *imagVal, const af_array in) {
             case u16: *realVal = mean<ushort, float>(in); break;
             case u8: *realVal = mean<uchar, float>(in); break;
             case b8: *realVal = mean<char, float>(in); break;
+            case f16: *realVal = mean<common::half, float>(in); break;
             case c32: {
                 cfloat tmp = mean<cfloat, cfloat>(in);
                 *realVal   = real(tmp);
@@ -178,16 +193,17 @@ af_err af_mean_all_weighted(double *realVal, double *imagVal, const af_array in,
                  f64)); /* verify that weights are non-complex real numbers */
 
         switch (iType) {
-            case f64: *realVal = mean<double>(in, weights); break;
-            case f32: *realVal = mean<float>(in, weights); break;
-            case s32: *realVal = mean<float>(in, weights); break;
-            case u32: *realVal = mean<float>(in, weights); break;
-            case s64: *realVal = mean<double>(in, weights); break;
+            case f32:
+            case s32:
+            case u32:
+            case s16:
+            case u16:
+            case u8:
+            case b8:
+            case f16: *realVal = mean<float>(in, weights); break;
+            case f64:
+            case s64:
             case u64: *realVal = mean<double>(in, weights); break;
-            case s16: *realVal = mean<float>(in, weights); break;
-            case u16: *realVal = mean<float>(in, weights); break;
-            case u8: *realVal = mean<float>(in, weights); break;
-            case b8: *realVal = mean<float>(in, weights); break;
             case c32: {
                 cfloat tmp = mean<cfloat>(in, weights);
                 *realVal   = real(tmp);

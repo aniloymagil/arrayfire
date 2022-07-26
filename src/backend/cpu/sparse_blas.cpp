@@ -69,12 +69,12 @@ using scale_type =
                               const typename blas_base<T>::type, const T>::type;
 
 template<typename To, typename Ti>
-To getScaleValue(Ti val) {
-    return (To)(val);
+auto getScaleValue(Ti val) -> std::remove_cv_t<To> {
+    return static_cast<std::remove_cv_t<To>>(val);
 }
 
 template<typename T, int value>
-scale_type<T> getScale() {
+scale_type<T> getScale() {  // NOLINT(readability-const-return-type)
     static T val(value);
     return getScaleValue<scale_type<T>, T>(val);
 }
@@ -93,7 +93,7 @@ sparse_operation_t toSparseTranspose(af_mat_prop opt) {
 #ifdef USE_MKL
 
 template<>
-const sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
+sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
     sp_cfloat ret;
     ret.real = val.real();
     ret.imag = val.imag();
@@ -101,7 +101,7 @@ const sp_cfloat getScaleValue<const sp_cfloat, cfloat>(cfloat val) {
 }
 
 template<>
-const sp_cdouble getScaleValue<const sp_cdouble, cdouble>(cdouble val) {
+sp_cdouble getScaleValue<const sp_cdouble, cdouble>(cdouble val) {
     sp_cdouble ret;
     ret.real = val.real();
     ret.imag = val.imag();
@@ -166,16 +166,15 @@ SPARSE_FUNC(create_csr, cdouble, z)
 
 template<typename T>
 using mv_func_def = sparse_status_t (*)(const sparse_operation_t, scale_type<T>,
-                                        const sparse_matrix_t,
-                                        matrix_descr, cptr_type<T>,
-                                        scale_type<T>, ptr_type<T>);
+                                        const sparse_matrix_t, matrix_descr,
+                                        cptr_type<T>, scale_type<T>,
+                                        ptr_type<T>);
 
 template<typename T>
 using mm_func_def = sparse_status_t (*)(const sparse_operation_t, scale_type<T>,
-                                        const sparse_matrix_t,
-                                        matrix_descr, sparse_layout_t,
-                                        cptr_type<T>, int, int, scale_type<T>,
-                                        ptr_type<T>, int);
+                                        const sparse_matrix_t, matrix_descr,
+                                        sparse_layout_t, cptr_type<T>, int, int,
+                                        scale_type<T>, ptr_type<T>, int);
 
 #define SPARSE_FUNC_DEF(FUNC) \
     template<typename T>      \
@@ -241,7 +240,7 @@ Array<T> matmul(const common::SparseArray<T> &lhs, const Array<T> &rhs,
                              pE, const_cast<int *>(colIdx.get()),
                              reinterpret_cast<ptr_type<T>>(vptr));
 
-        struct matrix_descr descrLhs;
+        struct matrix_descr descrLhs {};
         descrLhs.type = SPARSE_MATRIX_TYPE_GENERAL;
 
         mkl_sparse_optimize(csrLhs);
@@ -294,7 +293,6 @@ cdouble getConjugate(const cdouble &in) {
 template<typename T, bool conjugate>
 void mv(Param<T> output, CParam<T> values, CParam<int> rowIdx,
         CParam<int> colIdx, CParam<T> right, int M) {
-    UNUSED(M);
     const T *valPtr   = values.get();
     const int *rowPtr = rowIdx.get();
     const int *colPtr = colIdx.get();
@@ -302,8 +300,9 @@ void mv(Param<T> output, CParam<T> values, CParam<int> rowIdx,
 
     T *outPtr = output.get();
 
-    for (int i = 0; i < rowIdx.dims(0) - 1; ++i) {
-        outPtr[i] = scalar<T>(0);
+    // Output Array Created is a zero value Array
+    // Hence, no need to initialize to zero here
+    for (int i = 0; i < M; ++i) {
         for (int j = rowPtr[i]; j < rowPtr[i + 1]; ++j) {
             // If stride[0] of right is not 1 then rightPtr[colPtr[j]*stride]
             if (conjugate) {
@@ -318,14 +317,16 @@ void mv(Param<T> output, CParam<T> values, CParam<int> rowIdx,
 template<typename T, bool conjugate>
 void mtv(Param<T> output, CParam<T> values, CParam<int> rowIdx,
          CParam<int> colIdx, CParam<T> right, int M) {
+    UNUSED(M);
+
     const T *valPtr   = values.get();
     const int *rowPtr = rowIdx.get();
     const int *colPtr = colIdx.get();
     const T *rightPtr = right.get();
     T *outPtr         = output.get();
 
-    for (int i = 0; i < M; ++i) { outPtr[i] = scalar<T>(0); }
-
+    // Output Array Created is a zero value Array
+    // Hence, no need to initialize to zero here
     for (int i = 0; i < rowIdx.dims(0) - 1; ++i) {
         for (int j = rowPtr[i]; j < rowPtr[i + 1]; ++j) {
             // If stride[0] of right is not 1 then rightPtr[i*stride]

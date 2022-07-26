@@ -10,7 +10,7 @@
 #pragma once
 #include <Array.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <copy.hpp>
 #include <handle.hpp>
@@ -20,7 +20,7 @@
 
 #include <common/SparseArray.hpp>
 
-const common::SparseArrayBase &getSparseArrayBase(const af_array arr,
+const common::SparseArrayBase &getSparseArrayBase(const af_array in,
                                                   bool device_check = true);
 
 template<typename T>
@@ -66,7 +66,7 @@ common::SparseArray<To> castSparse(const af_array &in) {
 #define CAST_SPARSE(Ti)                                                          \
     do {                                                                         \
         const SparseArray<Ti> sparse = getSparseArray<Ti>(in);                   \
-        Array<To> values             = detail::cast<To, Ti>(sparse.getValues()); \
+        detail::Array<To> values     = common::cast<To, Ti>(sparse.getValues()); \
         return createArrayDataSparseArray(                                       \
             sparse.dims(), values, sparse.getRowIdx(), sparse.getColIdx(),       \
             sparse.getStorage());                                                \
@@ -75,8 +75,8 @@ common::SparseArray<To> castSparse(const af_array &in) {
     switch (info.getType()) {
         case f32: CAST_SPARSE(float);
         case f64: CAST_SPARSE(double);
-        case c32: CAST_SPARSE(cfloat);
-        case c64: CAST_SPARSE(cdouble);
+        case c32: CAST_SPARSE(detail::cfloat);
+        case c64: CAST_SPARSE(detail::cdouble);
         default: TYPE_ERROR(1, info.getType());
     }
 }

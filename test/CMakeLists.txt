@@ -1,4 +1,4 @@
-# Copyright (c) 2017, ArrayFire
+# Copyright (c) 2020, ArrayFire
 # All rights reserved.
 #
 # This file is distributed under 3-clause BSD license.
@@ -10,48 +10,74 @@ set(AF_TEST_WITH_MTX_FILES
     "Download and run tests on large matrices form sparse.tamu.edu")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
-if (AF_TEST_WITH_MTX_FILES)
+
+if(AF_TEST_WITH_MTX_FILES)
   include(download_sparse_datasets)
-endif ()
+endif()
 
 if(NOT TARGET gtest)
+  af_dep_check_and_populate(${gtest_prefix}
+    URI https://github.com/google/googletest.git
+    REF release-1.8.1
+  )
+
   # gtest targets cmake version 2.6 which throws warnings for policy CMP0042 on
   # newer cmakes. This sets the default global setting for that policy.
   set(CMAKE_POLICY_DEFAULT_CMP0042 NEW)
   if(WIN32)
     set(gtest_force_shared_crt ON
         CACHE INTERNAL "Required so that the libs Runtime is not set to MT DLL")
+    set(BUILD_SHARED_LIBS OFF)
   endif()
 
-  add_subdirectory(gtest EXCLUDE_FROM_ALL)
+  add_subdirectory(${${gtest_prefix}_SOURCE_DIR} ${${gtest_prefix}_BINARY_DIR} EXCLUDE_FROM_ALL)
   set_target_properties(gtest gtest_main
     PROPERTIES
       FOLDER "ExternalProjectTargets/gtest")
+  if(UNIX)
+    if("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" AND
+      CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "10.3.0")
+      target_compile_options(gtest PRIVATE -Wno-maybe-uninitialized)
+      target_compile_options(gtest_main PRIVATE -Wno-maybe-uninitialized)
+    endif()
+  endif()
 
   # Hide gtest project variables
   mark_as_advanced(
     BUILD_SHARED_LIBS
+    BUILD_GMOCK
+    INSTALL_GTEST
+    gmock_build_tests
     gtest_build_samples
     gtest_build_tests
     gtest_disable_pthreads
     gtest_force_shared_crt
-    gtest_hide_internal_symbols)
+    gtest_hide_internal_symbols
+  )
 endif()
 
-if(AF_TEST_WITH_MTX_FILES AND NOT TARGET mmio)
+if(NOT TARGET mmio)
   add_subdirectory(mmio)
 endif()
 
 # Reset the CXX flags for tests
-set(CMAKE_CXX_STANDARD 98)
-set(TESTDATA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data")
+set(CMAKE_CXX_STANDARD 11)
 
+# TODO(pradeep) perhaps rename AF_USE_RELATIVE_TEST_DIR to AF_WITH_TEST_DATA_DIR
+#               with empty default value
 if(${AF_USE_RELATIVE_TEST_DIR})
-    # RELATIVE_TEST_DATA_DIR is a User-visible option with default value of test/data directory
-    set(RELATIVE_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data" CACHE STRING "Relative Test Data Directory")
-    set(TESTDATA_SOURCE_DIR ${RELATIVE_TEST_DATA_DIR})
-else(${AF_USE_RELATIVE_TEST_DIR})  # Not using relative test data directory
-    set(TESTDATA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data")
+  # RELATIVE_TEST_DATA_DIR is a User-visible option with default value of test/data directory
+  # This code arm assumes user is responsible for providing the test data path
+  set(RELATIVE_TEST_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/data" CACHE
+      STRING "Relative Test Data Directory")
+  set(TESTDATA_SOURCE_DIR ${RELATIVE_TEST_DATA_DIR})
+else(${AF_USE_RELATIVE_TEST_DIR})
+  af_dep_check_and_populate(${testdata_prefix}
+    URI https://github.com/arrayfire/arrayfire-data.git
+    #pinv large data set update change
+    REF 0144a599f913cc67c76c9227031b4100156abc25
+  )
+  set(TESTDATA_SOURCE_DIR "${${testdata_prefix}_SOURCE_DIR}")
 endif(${AF_USE_RELATIVE_TEST_DIR})
 
 if(AF_BUILD_CPU)
@@ -70,7 +96,36 @@ if(AF_BUILD_UNIFIED)
   list(APPEND enabled_backends "unified")
 endif(AF_BUILD_UNIFIED)
 
-include(CMakeParseArguments)
+
+add_library(arrayfire_test OBJECT
+  testHelpers.hpp
+  arrayfire_test.cpp)
+
+target_include_directories(arrayfire_test
+  PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${ArrayFire_SOURCE_DIR}/include
+    ${ArrayFire_BINARY_DIR}/include
+    ${ArrayFire_SOURCE_DIR}/extern/half/include
+    mmio
+    $<TARGET_PROPERTY:Boost::boost,INTERFACE_INCLUDE_DIRECTORIES>
+    ${${gtest_prefix}_SOURCE_DIR}/googletest/include)
+
+if(WIN32)
+  target_compile_options(arrayfire_test
+    PRIVATE
+      /bigobj
+      /EHsc)
+  target_compile_definitions(arrayfire_test
+    PRIVATE
+      WIN32_LEAN_AND_MEAN
+      NOMINMAX)
+endif()
+
+target_compile_definitions(arrayfire_test
+  PRIVATE
+    TEST_RESULT_IMAGE_DIR="${CMAKE_BINARY_DIR}/test/"
+    USE_MTX)
 
 # Creates tests for all backends
 #
@@ -80,14 +135,14 @@ include(CMakeParseArguments)
 # Parameters
 # ----------
 # 'CXX11'       If set the tests will be compiled using c++11. Tests should strive
-#               to be C++98 compilient
+#               to be C++98 compliant
 # 'SRC'         The source files for the test
 # 'LIBRARIES'   Libraries other than ArrayFire that need to be linked
 # 'DEFINITIONS' Definitions that need to be defined
 # 'BACKENDS'    Backends to target for this test. If not set then the test will
 #               compiled againat all backends
 function(make_test)
-  set(options CXX11 SERIAL)
+  set(options CXX11 SERIAL USE_MMIO NO_ARRAYFIRE_TEST)
   set(single_args SRC)
   set(multi_args LIBRARIES DEFINITIONS BACKENDS)
   cmake_parse_arguments(mt_args "${options}" "${single_args}" "${multi_args}" ${ARGN})
@@ -99,7 +154,12 @@ function(make_test)
       continue()
     endif()
     set(target "test_${src_name}_${backend}")
-    add_executable(${target} ${mt_args_SRC})
+
+    if (${mt_args_NO_ARRAYFIRE_TEST})
+      add_executable(${target} ${mt_args_SRC})
+    else()
+      add_executable(${target} ${mt_args_SRC} $<TARGET_OBJECTS:arrayfire_test>)
+    endif()
     target_include_directories(${target}
       PRIVATE
         ${ArrayFire_SOURCE_DIR}/extern/half/include
@@ -108,9 +168,8 @@ function(make_test)
       )
     target_link_libraries(${target}
       PRIVATE
-        gtest
-        gtest_main
         ${mt_args_LIBRARIES}
+        gtest
       )
 
     if(${backend} STREQUAL "unified")
@@ -141,6 +200,13 @@ function(make_test)
         AF_$<UPPER_CASE:${backend}>
         ${mt_args_DEFINITIONS}
       )
+    target_link_libraries(${target} PRIVATE mmio)
+    if(AF_TEST_WITH_MTX_FILES AND ${mt_args_USE_MMIO})
+      target_compile_definitions(${target}
+        PRIVATE
+        MTX_TEST_DIR="${ArrayFire_BINARY_DIR}/extern/matrixmarket/"
+        )
+    endif()
     if(WIN32)
       target_compile_options(${target}
         PRIVATE
@@ -169,20 +235,21 @@ make_test(SRC anisotropic_diffusion.cpp)
 make_test(SRC approx1.cpp)
 make_test(SRC approx2.cpp)
 make_test(SRC array.cpp CXX11)
+make_test(SRC array_death_tests.cpp CXX11 SERIAL)
 make_test(SRC arrayio.cpp)
 make_test(SRC assign.cpp CXX11)
-make_test(SRC backend.cpp)
+make_test(SRC backend.cpp CXX11)
 make_test(SRC basic.cpp)
-make_test(SRC basic_c.c)
 make_test(SRC bilateral.cpp)
 make_test(SRC binary.cpp CXX11)
 make_test(SRC blas.cpp)
 make_test(SRC canny.cpp)
 make_test(SRC cast.cpp)
-make_test(SRC cholesky_dense.cpp)
+make_test(SRC cholesky_dense.cpp SERIAL)
 make_test(SRC clamp.cpp)
 make_test(SRC compare.cpp)
 make_test(SRC complex.cpp)
+make_test(SRC confidence_connected.cpp CXX11)
 make_test(SRC constant.cpp)
 make_test(SRC convolve.cpp CXX11)
 make_test(SRC corrcoef.cpp)
@@ -193,6 +260,7 @@ make_test(SRC diff2.cpp)
 make_test(SRC dog.cpp)
 make_test(SRC dot.cpp)
 make_test(SRC empty.cpp)
+make_test(SRC event.cpp CXX11)
 make_test(SRC fast.cpp)
 make_test(SRC fft.cpp)
 make_test(SRC fft_large.cpp)
@@ -226,7 +294,6 @@ make_test(SRC iterative_deconv.cpp)
 make_test(SRC jit.cpp CXX11)
 make_test(SRC join.cpp)
 make_test(SRC lu_dense.cpp SERIAL)
-make_test(SRC main.cpp)
 #make_test(manual_memory_test.cpp)
 make_test(SRC match_template.cpp)
 make_test(SRC math.cpp CXX11)
@@ -236,30 +303,95 @@ make_test(SRC meanshift.cpp)
 make_test(SRC meanvar.cpp CXX11)
 make_test(SRC medfilt.cpp)
 make_test(SRC median.cpp)
-make_test(SRC memory.cpp)
+make_test(SRC memory.cpp CXX11)
 make_test(SRC memory_lock.cpp)
 make_test(SRC missing.cpp)
 make_test(SRC moddims.cpp)
 make_test(SRC moments.cpp)
 make_test(SRC morph.cpp)
 make_test(SRC nearest_neighbour.cpp CXX11)
+make_test(SRC nodevice.cpp CXX11)
 
 if(OpenCL_FOUND)
   make_test(SRC ocl_ext_context.cpp
+            LIBRARIES OpenCL::OpenCL OpenCL::cl2hpp
+            BACKENDS "opencl"
+            CXX11)
+  make_test(SRC interop_opencl_custom_kernel_snippet.cpp
             LIBRARIES OpenCL::OpenCL
-            BACKENDS "opencl")
+            BACKENDS "opencl"
+            NO_ARRAYFIRE_TEST
+            CXX11)
+  make_test(SRC interop_opencl_external_context_snippet.cpp
+            LIBRARIES OpenCL::OpenCL OpenCL::cl2hpp
+            BACKENDS "opencl"
+            NO_ARRAYFIRE_TEST
+            CXX11)
 endif()
 
+if(CUDA_FOUND)
+  foreach(backend ${enabled_backends})
+    set(cuda_test_backends "cuda" "unified")
+    if(${backend} IN_LIST cuda_test_backends)
+      set(target test_cuda_${backend})
+      if(${CMAKE_VERSION} VERSION_LESS 3.5.2)
+        cuda_include_directories(
+          ${ArrayFire_SOURCE_DIR}/include
+          ${ArrayFire_BINARY_DIR}/include
+          ${ArrayFire_SOURCE_DIR}/extern/half/include
+          ${CMAKE_CURRENT_SOURCE_DIR}
+          ${${gtest_prefix}_SOURCE_DIR}/googletest/include
+        )
+      endif()
+      cuda_add_executable(${target} cuda.cu  $<TARGET_OBJECTS:arrayfire_test>)
+      target_include_directories(${target} PRIVATE
+        ${ArrayFire_SOURCE_DIR}/extern/half/include
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR})
+      if(${backend} STREQUAL "unified")
+        target_link_libraries(${target}
+          ArrayFire::af)
+      else()
+        target_link_libraries(${target}
+          ArrayFire::af${backend})
+      endif()
+      target_link_libraries(${target}
+        mmio
+        gtest)
+
+      # Couldn't get Threads::Threads to work with this cuda binary. The import
+      # target would not add the -pthread flag which is required for this
+      # executable (on Ubuntu 18.04 anyway)
+      check_cxx_compiler_flag(-pthread pthread_flag)
+      if(pthread_flag)
+        target_link_libraries(${target} -pthread)
+      endif()
+
+      set_target_properties(${target}
+        PROPERTIES
+        FOLDER "Tests"
+        OUTPUT_NAME "cuda_${backend}")
+
+      if(NOT ${backend} STREQUAL "unified")
+        add_test(NAME ${target} COMMAND ${target})
+      endif()
+    endif()
+  endforeach()
+endif()
+
+
 make_test(SRC orb.cpp)
-make_test(SRC pinverse.cpp)
+make_test(SRC pad_borders.cpp CXX11)
+make_test(SRC pinverse.cpp SERIAL)
 make_test(SRC qr_dense.cpp SERIAL)
 make_test(SRC random.cpp)
+make_test(SRC rng_quality.cpp BACKENDS "cuda;opencl" SERIAL)
 make_test(SRC range.cpp)
 make_test(SRC rank_dense.cpp SERIAL)
-make_test(SRC reduce.cpp)
+make_test(SRC reduce.cpp CXX11)
 make_test(SRC regions.cpp)
 make_test(SRC reorder.cpp)
-make_test(SRC replace.cpp)
+make_test(SRC replace.cpp CXX11)
 make_test(SRC resize.cpp)
 make_test(SRC rng_match.cpp CXX11 BACKENDS "unified")
 make_test(SRC rotate.cpp)
@@ -267,24 +399,18 @@ make_test(SRC rotate_linear.cpp)
 make_test(SRC sat.cpp)
 make_test(SRC scan.cpp)
 make_test(SRC scan_by_key.cpp)
-make_test(SRC select.cpp)
+make_test(SRC select.cpp CXX11)
 make_test(SRC set.cpp CXX11)
 make_test(SRC shift.cpp)
-
-if(AF_WITH_NONFREE)
-  make_test(SRC gloh_nonfree.cpp DEFINITIONS AF_WITH_NONFREE_SIFT)
-  make_test(SRC sift_nonfree.cpp DEFINITIONS AF_WITH_NONFREE_SIFT)
-endif()
-
+make_test(SRC gloh.cpp)
+make_test(SRC sift.cpp)
 make_test(SRC sobel.cpp)
 make_test(SRC solve_dense.cpp       CXX11 SERIAL)
 make_test(SRC sort.cpp)
 make_test(SRC sort_by_key.cpp)
 make_test(SRC sort_index.cpp)
-make_test(SRC sparse.cpp SERIAL
-    $<$<BOOL:${AF_TEST_WITH_MTX_FILES}>:LIBRARIES mmio>)
-make_test(SRC sparse_arith.cpp
-    $<$<BOOL:${AF_TEST_WITH_MTX_FILES}>:LIBRARIES mmio>)
+make_test(SRC sparse.cpp SERIAL)
+make_test(SRC sparse_arith.cpp      USE_MMIO)
 make_test(SRC sparse_convert.cpp)
 make_test(SRC stdev.cpp)
 make_test(SRC susan.cpp)
@@ -305,8 +431,23 @@ make_test(SRC wrap.cpp)
 make_test(SRC write.cpp)
 make_test(SRC ycbcr_rgb.cpp)
 
+foreach(backend ${enabled_backends})
+  set(target "basic_c_${backend}")
+  add_executable(${target} basic_c.c)
+  if(${backend} STREQUAL "unified")
+    target_link_libraries(${target}
+      PRIVATE
+      ArrayFire::af)
+  else()
+    target_link_libraries(${target}
+      PRIVATE
+      ArrayFire::af${backend})
+  endif()
+  add_test(NAME test_${target} COMMAND ${target})
+endforeach()
+
 if(AF_TEST_WITH_MTX_FILES)
-    make_test(SRC matrixmarket.cpp LIBRARIES mmio)
+  make_test(SRC matrixmarket.cpp USE_MMIO)
 endif()
 
 add_executable(print_info print_info.cpp)
@@ -319,3 +460,5 @@ elseif(AF_BUILD_CUDA)
 elseif(AF_BUILD_CPU)
   target_link_libraries(print_info ArrayFire::afcpu)
 endif()
+
+make_test(SRC jit_test_api.cpp)

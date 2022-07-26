@@ -11,8 +11,9 @@
 #include <arith.hpp>
 #include <blas.hpp>
 #include <common/defines.hpp>
-#include <common/indexing_helpers.hpp>
 #include <common/half.hpp>
+#include <common/indexing_helpers.hpp>
+#include <common/moddims.hpp>
 #include <convolve.hpp>
 #include <handle.hpp>
 #include <kernel/convolve.hpp>
@@ -29,53 +30,53 @@
 using af::dim4;
 using common::flip;
 using common::half;
-using std::vector;
+using common::modDims;
 
 namespace cpu {
 
-template<typename T, typename accT, int baseDim, bool expand>
+template<typename T, typename accT>
 Array<T> convolve(Array<T> const &signal, Array<accT> const &filter,
-                  AF_BATCH_KIND kind) {
+                  AF_BATCH_KIND kind, const int rank, const bool expand) {
     auto sDims = signal.dims();
     auto fDims = filter.dims();
 
     dim4 oDims(1);
     if (expand) {
-        for (dim_t d = 0; d < 4; ++d) {
+        for (int d = 0; d < AF_MAX_DIMS; ++d) {
             if (kind == AF_BATCH_NONE || kind == AF_BATCH_RHS) {
                 oDims[d] = sDims[d] + fDims[d] - 1;
             } else {
-                oDims[d] = (d < baseDim ? sDims[d] + fDims[d] - 1 : sDims[d]);
+                oDims[d] = (d < rank ? sDims[d] + fDims[d] - 1 : sDims[d]);
             }
         }
     } else {
         oDims = sDims;
         if (kind == AF_BATCH_RHS) {
-            for (dim_t i = baseDim; i < 4; ++i) oDims[i] = fDims[i];
+            for (int i = rank; i < AF_MAX_DIMS; ++i) { oDims[i] = fDims[i]; }
         }
     }
 
     Array<T> out = createEmptyArray<T>(oDims);
 
-    getQueue().enqueue(kernel::convolve_nd<T, accT, baseDim, expand>, out,
-                       signal, filter, kind);
+    getQueue().enqueue(kernel::convolve_nd<T, accT>, out, signal, filter, kind,
+                       rank, expand);
 
     return out;
 }
 
-template<typename T, typename accT, bool expand>
+template<typename T, typename accT>
 Array<T> convolve2(Array<T> const &signal, Array<accT> const &c_filter,
-                   Array<accT> const &r_filter) {
-    auto sDims = signal.dims();
-    dim4 tDims = sDims;
-    dim4 oDims = sDims;
+                   Array<accT> const &r_filter, const bool expand) {
+    const auto &sDims = signal.dims();
+    dim4 tDims        = sDims;
+    dim4 oDims        = sDims;
 
     if (expand) {
         auto cfDims = c_filter.dims();
         auto rfDims = r_filter.dims();
 
-        dim_t cflen = (dim_t)cfDims.elements();
-        dim_t rflen = (dim_t)rfDims.elements();
+        auto cflen = cfDims.elements();
+        auto rflen = rfDims.elements();
         // separable convolve only does AF_BATCH_NONE and standard
         // batch(AF_BATCH_LHS)
         tDims[0] += cflen - 1;
@@ -86,37 +87,22 @@ Array<T> convolve2(Array<T> const &signal, Array<accT> const &c_filter,
     Array<T> out  = createEmptyArray<T>(oDims);
     Array<T> temp = createEmptyArray<T>(tDims);
 
-    getQueue().enqueue(kernel::convolve2<T, accT, expand>, out, signal,
-                       c_filter, r_filter, temp);
-
+    if (expand) {
+        getQueue().enqueue(kernel::convolve2<T, accT, true>, out, signal,
+                           c_filter, r_filter, temp);
+    } else {
+        getQueue().enqueue(kernel::convolve2<T, accT, false>, out, signal,
+                           c_filter, r_filter, temp);
+    }
     return out;
 }
 
-#define INSTANTIATE(T, accT)                                                 \
-    template Array<T> convolve<T, accT, 1, true>(Array<T> const &signal,     \
-                                                 Array<accT> const &filter,  \
-                                                 AF_BATCH_KIND kind);        \
-    template Array<T> convolve<T, accT, 1, false>(Array<T> const &signal,    \
-                                                  Array<accT> const &filter, \
-                                                  AF_BATCH_KIND kind);       \
-    template Array<T> convolve<T, accT, 2, true>(Array<T> const &signal,     \
-                                                 Array<accT> const &filter,  \
-                                                 AF_BATCH_KIND kind);        \
-    template Array<T> convolve<T, accT, 2, false>(Array<T> const &signal,    \
-                                                  Array<accT> const &filter, \
-                                                  AF_BATCH_KIND kind);       \
-    template Array<T> convolve<T, accT, 3, true>(Array<T> const &signal,     \
-                                                 Array<accT> const &filter,  \
-                                                 AF_BATCH_KIND kind);        \
-    template Array<T> convolve<T, accT, 3, false>(Array<T> const &signal,    \
-                                                  Array<accT> const &filter, \
-                                                  AF_BATCH_KIND kind);       \
-    template Array<T> convolve2<T, accT, true>(Array<T> const &signal,       \
-                                               Array<accT> const &c_filter,  \
-                                               Array<accT> const &r_filter); \
-    template Array<T> convolve2<T, accT, false>(Array<T> const &signal,      \
-                                                Array<accT> const &c_filter, \
-                                                Array<accT> const &r_filter);
+#define INSTANTIATE(T, accT)                                                   \
+    template Array<T> convolve<T, accT>(Array<T> const &, Array<accT> const &, \
+                                        AF_BATCH_KIND, const int, const bool); \
+    template Array<T> convolve2<T, accT>(Array<T> const &,                     \
+                                         Array<accT> const &,                  \
+                                         Array<accT> const &, const bool);
 
 INSTANTIATE(cdouble, cdouble)
 INSTANTIATE(cfloat, cfloat)
@@ -134,8 +120,8 @@ INSTANTIATE(intl, float)
 
 template<typename T>
 Array<T> convolve2_unwrap(const Array<T> &signal, const Array<T> &filter,
-                          const dim4 stride, const dim4 padding,
-                          const dim4 dilation) {
+                          const dim4 &stride, const dim4 &padding,
+                          const dim4 &dilation) {
     dim4 sDims = signal.dims();
     dim4 fDims = filter.dims();
 
@@ -153,15 +139,17 @@ Array<T> convolve2_unwrap(const Array<T> &signal, const Array<T> &filter,
 
     unwrapped  = reorder(unwrapped, dim4(1, 2, 0, 3));
     dim4 uDims = unwrapped.dims();
-    unwrapped.modDims(dim4(uDims[0] * uDims[1], uDims[2] * uDims[3]));
+    unwrapped =
+        modDims(unwrapped, dim4(uDims[0] * uDims[1], uDims[2] * uDims[3]));
 
     Array<T> collapsedFilter = flip(filter, {1, 1, 0, 0});
-    collapsedFilter.modDims(dim4(fDims[0] * fDims[1] * fDims[2], fDims[3]));
+    collapsedFilter          = modDims(collapsedFilter,
+                              dim4(fDims[0] * fDims[1] * fDims[2], fDims[3]));
 
     Array<T> res =
         matmul(unwrapped, collapsedFilter, AF_MAT_TRANS, AF_MAT_NONE);
-    res.modDims(dim4(outputWidth, outputHeight, signal.dims()[3],
-                     collapsedFilter.dims()[1]));
+    res = modDims(res, dim4(outputWidth, outputHeight, signal.dims()[3],
+                            collapsedFilter.dims()[1]));
     Array<T> out = reorder(res, dim4(0, 1, 3, 2));
 
     return out;
@@ -190,23 +178,26 @@ template<typename T>
 Array<T> conv2DataGradient(const Array<T> &incoming_gradient,
                            const Array<T> &original_signal,
                            const Array<T> &original_filter,
-                           const Array<T> &convolved_output, af::dim4 stride,
-                           af::dim4 padding, af::dim4 dilation) {
-    const dim4 cDims = incoming_gradient.dims();
-    const dim4 sDims = original_signal.dims();
-    const dim4 fDims = original_filter.dims();
+                           const Array<T> & /*convolved_output*/,
+                           af::dim4 stride, af::dim4 padding,
+                           af::dim4 dilation) {
+    const dim4 &cDims = incoming_gradient.dims();
+    const dim4 &sDims = original_signal.dims();
+    const dim4 &fDims = original_filter.dims();
 
     Array<T> collapsed_filter = flip(original_filter, {1, 1, 0, 0});
-    collapsed_filter.modDims(dim4(fDims[0] * fDims[1] * fDims[2], fDims[3]));
+    collapsed_filter          = modDims(collapsed_filter,
+                               dim4(fDims[0] * fDims[1] * fDims[2], fDims[3]));
 
     Array<T> collapsed_gradient = incoming_gradient;
     collapsed_gradient          = reorder(collapsed_gradient, dim4(0, 1, 3, 2));
-    collapsed_gradient.modDims(dim4(cDims[0] * cDims[1] * cDims[3], cDims[2]));
+    collapsed_gradient          = modDims(
+        collapsed_gradient, dim4(cDims[0] * cDims[1] * cDims[3], cDims[2]));
 
     Array<T> res =
         matmul(collapsed_gradient, collapsed_filter, AF_MAT_NONE, AF_MAT_TRANS);
-    res.modDims(dim4(res.dims()[0] / sDims[3], sDims[3], fDims[0] * fDims[1],
-                     sDims[2]));
+    res = modDims(res, dim4(res.dims()[0] / sDims[3], sDims[3],
+                            fDims[0] * fDims[1], sDims[2]));
     res = reorder(res, dim4(0, 2, 3, 1));
 
     const bool retCols = false;
@@ -221,10 +212,11 @@ template<typename T>
 Array<T> conv2FilterGradient(const Array<T> &incoming_gradient,
                              const Array<T> &original_signal,
                              const Array<T> &original_filter,
-                             const Array<T> &convolved_output, af::dim4 stride,
-                             af::dim4 padding, af::dim4 dilation) {
-    const dim4 cDims = incoming_gradient.dims();
-    const dim4 fDims = original_filter.dims();
+                             const Array<T> & /*convolved_output*/,
+                             af::dim4 stride, af::dim4 padding,
+                             af::dim4 dilation) {
+    const dim4 &cDims = incoming_gradient.dims();
+    const dim4 &fDims = original_filter.dims();
 
     const bool retCols = false;
     Array<T> unwrapped =
@@ -233,15 +225,17 @@ Array<T> conv2FilterGradient(const Array<T> &incoming_gradient,
 
     unwrapped  = reorder(unwrapped, dim4(1, 2, 0, 3));
     dim4 uDims = unwrapped.dims();
-    unwrapped.modDims(dim4(uDims[0] * uDims[1], uDims[2] * uDims[3]));
+    unwrapped =
+        modDims(unwrapped, dim4(uDims[0] * uDims[1], uDims[2] * uDims[3]));
 
     Array<T> collapsed_gradient = incoming_gradient;
     collapsed_gradient          = reorder(collapsed_gradient, dim4(0, 1, 3, 2));
-    collapsed_gradient.modDims(dim4(cDims[0] * cDims[1] * cDims[3], cDims[2]));
+    collapsed_gradient          = modDims(
+        collapsed_gradient, dim4(cDims[0] * cDims[1] * cDims[3], cDims[2]));
 
     Array<T> res =
         matmul(unwrapped, collapsed_gradient, AF_MAT_NONE, AF_MAT_NONE);
-    res.modDims(dim4(fDims[0], fDims[1], fDims[2], fDims[3]));
+    res = modDims(res, dim4(fDims[0], fDims[1], fDims[2], fDims[3]));
 
     return flip(res, {1, 1, 0, 0});
 }

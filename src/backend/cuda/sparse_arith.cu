@@ -7,23 +7,24 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <kernel/sparse_arith.hpp>
-#include <sparse.hpp>
-
-#include <stdexcept>
-#include <string>
+#include <sparse_arith.hpp>
 
 #include <arith.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <common/unique_handle.hpp>
 #include <complex.hpp>
 #include <copy.hpp>
 #include <cusparse.hpp>
+#include <kernel/sparse_arith.hpp>
 #include <lookup.hpp>
 #include <math.hpp>
 #include <platform.hpp>
+#include <sparse.hpp>
 #include <where.hpp>
+
+#include <stdexcept>
+#include <string>
 
 namespace cuda {
 
@@ -110,6 +111,62 @@ SparseArray<T> arithOp(const SparseArray<T> &lhs, const Array<T> &rhs,
     return out;
 }
 
+#define SPARSE_ARITH_OP_FUNC_DEF(FUNC) \
+    template<typename T>               \
+    FUNC##_def<T> FUNC##_func();
+
+#define SPARSE_ARITH_OP_FUNC(FUNC, TYPE, INFIX)  \
+    template<>                                   \
+    FUNC##_def<TYPE> FUNC##_func<TYPE>() {       \
+        cusparseModule &_ = getCusparsePlugin(); \
+        return _.cusparse##INFIX##FUNC;          \
+    }
+
+#if CUDA_VERSION >= 11000
+
+template<typename T>
+using csrgeam2_buffer_size_def = cusparseStatus_t (*)(
+    cusparseHandle_t, int, int, const T *, const cusparseMatDescr_t, int,
+    const T *, const int *, const int *, const T *, const cusparseMatDescr_t,
+    int, const T *, const int *, const int *, const cusparseMatDescr_t,
+    const T *, const int *, const int *, size_t *);
+
+#define SPARSE_ARITH_OP_BUFFER_SIZE_FUNC_DEF(FUNC) \
+    template<typename T>                           \
+    FUNC##_buffer_size_def<T> FUNC##_buffer_size_func();
+
+SPARSE_ARITH_OP_BUFFER_SIZE_FUNC_DEF(csrgeam2);
+
+#define SPARSE_ARITH_OP_BUFFER_SIZE_FUNC(FUNC, TYPE, INFIX)        \
+    template<>                                                     \
+    FUNC##_buffer_size_def<TYPE> FUNC##_buffer_size_func<TYPE>() { \
+        cusparseModule &_ = getCusparsePlugin();                   \
+        return _.cusparse##INFIX##FUNC##_bufferSizeExt;            \
+    }
+
+SPARSE_ARITH_OP_BUFFER_SIZE_FUNC(csrgeam2, float, S);
+SPARSE_ARITH_OP_BUFFER_SIZE_FUNC(csrgeam2, double, D);
+SPARSE_ARITH_OP_BUFFER_SIZE_FUNC(csrgeam2, cfloat, C);
+SPARSE_ARITH_OP_BUFFER_SIZE_FUNC(csrgeam2, cdouble, Z);
+
+template<typename T>
+using csrgeam2_def = cusparseStatus_t (*)(cusparseHandle_t, int, int, const T *,
+                                          const cusparseMatDescr_t, int,
+                                          const T *, const int *, const int *,
+                                          const T *, const cusparseMatDescr_t,
+                                          int, const T *, const int *,
+                                          const int *, const cusparseMatDescr_t,
+                                          T *, int *, int *, void *);
+
+SPARSE_ARITH_OP_FUNC_DEF(csrgeam2);
+
+SPARSE_ARITH_OP_FUNC(csrgeam2, float, S);
+SPARSE_ARITH_OP_FUNC(csrgeam2, double, D);
+SPARSE_ARITH_OP_FUNC(csrgeam2, cfloat, C);
+SPARSE_ARITH_OP_FUNC(csrgeam2, cdouble, Z);
+
+#else
+
 template<typename T>
 using csrgeam_def = cusparseStatus_t (*)(cusparseHandle_t, int, int, const T *,
                                          const cusparseMatDescr_t, int,
@@ -119,38 +176,27 @@ using csrgeam_def = cusparseStatus_t (*)(cusparseHandle_t, int, int, const T *,
                                          const int *, const cusparseMatDescr_t,
                                          T *, int *, int *);
 
-#define SPARSE_ARITH_OP_FUNC_DEF(FUNC) \
-    template<typename T>               \
-    FUNC##_def<T> FUNC##_func();
-
 SPARSE_ARITH_OP_FUNC_DEF(csrgeam);
-
-#define SPARSE_ARITH_OP_FUNC(FUNC, TYPE, INFIX) \
-    template<>                                  \
-    FUNC##_def<TYPE> FUNC##_func<TYPE>() {      \
-        return cusparse##INFIX##FUNC;           \
-    }
 
 SPARSE_ARITH_OP_FUNC(csrgeam, float, S);
 SPARSE_ARITH_OP_FUNC(csrgeam, double, D);
 SPARSE_ARITH_OP_FUNC(csrgeam, cfloat, C);
 SPARSE_ARITH_OP_FUNC(csrgeam, cdouble, Z);
 
+#endif
+
 template<typename T, af_op_t op>
 SparseArray<T> arithOp(const SparseArray<T> &lhs, const SparseArray<T> &rhs) {
     lhs.eval();
     rhs.eval();
-    af::storage sfmt = lhs.getStorage();
 
-    auto desc = make_handle<cusparseMatDescr_t>();
-    const dim4 ldims = lhs.dims();
-
-    const int M = ldims[0];
-    const int N = ldims[1];
-
-    const dim_t nnzA = lhs.getNNZ();
-    const dim_t nnzB = rhs.getNNZ();
-
+    af::storage sfmt      = lhs.getStorage();
+    auto desc             = make_handle<cusparseMatDescr_t>();
+    const dim4 ldims      = lhs.dims();
+    const int M           = ldims[0];
+    const int N           = ldims[1];
+    const dim_t nnzA      = lhs.getNNZ();
+    const dim_t nnzB      = rhs.getNNZ();
     const int *csrRowPtrA = lhs.getRowIdx().get();
     const int *csrColPtrA = lhs.getColIdx().get();
     const int *csrRowPtrB = rhs.getRowIdx().get();
@@ -162,9 +208,29 @@ SparseArray<T> arithOp(const SparseArray<T> &lhs, const SparseArray<T> &rhs) {
     int baseC, nnzC;
     int *nnzcDevHostPtr = &nnzC;
 
-    CUSPARSE_CHECK(cusparseXcsrgeamNnz(
+    T alpha           = scalar<T>(1);
+    T beta            = op == af_sub_t ? scalar<T>(-1) : alpha;
+    cusparseModule &_ = getCusparsePlugin();
+
+#if CUDA_VERSION >= 11000
+    size_t pBufferSize = 0;
+
+    csrgeam2_buffer_size_func<T>()(
+        sparseHandle(), M, N, &alpha, desc, nnzA, lhs.getValues().get(),
+        csrRowPtrA, csrColPtrA, &beta, desc, nnzB, rhs.getValues().get(),
+        csrRowPtrB, csrColPtrB, desc, NULL, csrRowPtrC, NULL, &pBufferSize);
+
+    auto tmpBuffer = createEmptyArray<char>(dim4(pBufferSize));
+
+    CUSPARSE_CHECK(_.cusparseXcsrgeam2Nnz(
+        sparseHandle(), M, N, desc, nnzA, csrRowPtrA, csrColPtrA, desc, nnzB,
+        csrRowPtrB, csrColPtrB, desc, csrRowPtrC, nnzcDevHostPtr,
+        tmpBuffer.get()));
+#else
+    CUSPARSE_CHECK(_.cusparseXcsrgeamNnz(
         sparseHandle(), M, N, desc, nnzA, csrRowPtrA, csrColPtrA, desc, nnzB,
         csrRowPtrB, csrColPtrB, desc, csrRowPtrC, nnzcDevHostPtr));
+#endif
     if (NULL != nnzcDevHostPtr) {
         nnzC = *nnzcDevHostPtr;
     } else {
@@ -180,15 +246,18 @@ SparseArray<T> arithOp(const SparseArray<T> &lhs, const SparseArray<T> &rhs) {
 
     auto outColIdx = createEmptyArray<int>(dim4(nnzC));
     auto outValues = createEmptyArray<T>(dim4(nnzC));
-
-    T alpha = scalar<T>(1);
-    T beta  = op == af_sub_t ? scalar<T>(-1) : alpha;
-
+#if CUDA_VERSION >= 11000
+    csrgeam2_func<T>()(sparseHandle(), M, N, &alpha, desc, nnzA,
+                       lhs.getValues().get(), csrRowPtrA, csrColPtrA, &beta,
+                       desc, nnzB, rhs.getValues().get(), csrRowPtrB,
+                       csrColPtrB, desc, outValues.get(), csrRowPtrC,
+                       outColIdx.get(), tmpBuffer.get());
+#else
     csrgeam_func<T>()(sparseHandle(), M, N, &alpha, desc, nnzA,
                       lhs.getValues().get(), csrRowPtrA, csrColPtrA, &beta,
                       desc, nnzB, rhs.getValues().get(), csrRowPtrB, csrColPtrB,
                       desc, outValues.get(), csrRowPtrC, outColIdx.get());
-
+#endif
     SparseArray<T> retVal = createArrayDataSparseArray(
         ldims, outValues, outRowIdx, outColIdx, sfmt);
     return retVal;

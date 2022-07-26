@@ -7,7 +7,6 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 #include <arrayfire.h>
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
@@ -673,8 +672,8 @@ TEST(Convolve, 1D_C32) {
 
     cfloat acc = sum<cfloat>(out - gld);
 
-    EXPECT_EQ(std::abs(real(acc)) < 1E-3, true);
-    EXPECT_EQ(std::abs(imag(acc)) < 1E-3, true);
+    EXPECT_LT(std::abs(real(acc)), 1E-3);
+    EXPECT_LT(std::abs(imag(acc)), 1E-3);
 }
 
 TEST(Convolve, 2D_C32) {
@@ -686,8 +685,8 @@ TEST(Convolve, 2D_C32) {
 
     cfloat acc = sum<cfloat>(out - gld);
 
-    EXPECT_EQ(std::abs(real(acc)) < 1E-3, true);
-    EXPECT_EQ(std::abs(imag(acc)) < 1E-3, true);
+    EXPECT_LT(std::abs(real(acc)), 1E-3);
+    EXPECT_LT(std::abs(imag(acc)), 1E-3);
 }
 
 TEST(Convolve, 3D_C32) {
@@ -889,22 +888,28 @@ TEST_P(Conv2ConsistencyTest, RandomConvolutions) {
 
     array out_native = convolve2(signal, filter);
     array out = convolve2NN(signal, filter, params.stride_, params.padding_,
-                             params.dilation_);
+                            params.dilation_);
 
-    ASSERT_ARRAYS_NEAR(out_native, out, 1e-5);
+    ASSERT_ARRAYS_NEAR(out_native, out, 2e-5);
 }
 
 template<typename T>
 float tolerance();
 
 template<>
-float tolerance<float>() { return 1e-4; }
+float tolerance<float>() {
+    return 1e-4;
+}
 
 template<>
-float tolerance<double>() { return 1e-4; }
+float tolerance<double>() {
+    return 1e-4;
+}
 
 template<>
-float tolerance<half_float::half>() { return 3e-2; }
+float tolerance<half_float::half>() {
+    return 7e-2;
+}
 
 template<typename T>
 void convolve2stridedTest(string pTestFile, dim4 stride, dim4 padding,
@@ -935,8 +940,6 @@ void convolve2stridedTest(string pTestFile, dim4 stride, dim4 padding,
                                    dilation.ndims(), dilation.get()));
 
     vector<T> &currGoldBar = tests[0];
-
-    size_t nElems = currGoldBar.size();
 
     dim_t expectedDim0 =
         1 + (sDims[0] + 2 * padding[0] - (((fDims[0] - 1) * dilation[0]) + 1)) /
@@ -1011,10 +1014,12 @@ void convolve2GradientTest(string pTestFile, dim4 stride, dim4 padding,
         dilation.ndims(), dilation.get(), AF_CONV_GRADIENT_DATA));
 
     vector<T> &dataGradientGold = tests[1];
-    ASSERT_VEC_ARRAY_NEAR(dataGradientGold, sDims, data_gradient, tolerance<T>());
+    ASSERT_VEC_ARRAY_NEAR(dataGradientGold, sDims, data_gradient,
+                          tolerance<T>());
 
     vector<T> &filterGradientGold = tests[2];
-    ASSERT_VEC_ARRAY_NEAR(filterGradientGold, fDims, filter_gradient, tolerance<T>());
+    ASSERT_VEC_ARRAY_NEAR(filterGradientGold, fDims, filter_gradient,
+                          tolerance<T>());
 
     ASSERT_SUCCESS(af_release_array(incoming_gradient));
     ASSERT_SUCCESS(af_release_array(convolved));
@@ -1160,4 +1165,15 @@ TYPED_TEST(ConvolveStrided, Gradient_sig81032_filt3334_s11_p11_d11) {
     convolve2GradientTest<TypeParam>(
         string(TEST_DIR "/convolve/sig81032_filt3334_s11_p11_d11.test"),
         dim4(1, 1), dim4(1, 1), dim4(1, 1));
+}
+
+TEST(ConvolveNN, ZeroPadding_Issue2817) {
+    array signal = constant(1.f, 5, 5);
+    array filter = constant(1 / 9.f, 3, 3);
+    dim4 strides(1, 1), dilation(1, 1);
+    dim4 padding(0, 0, 1, 1);
+
+    array convolved = convolve2NN(signal, filter, strides, padding, dilation);
+    ASSERT_EQ(sum<float>(abs(signal(seq(1, 3), seq(1, 3)) - convolved)) < 1E-5,
+              true);
 }

@@ -12,9 +12,10 @@
 
 #include <arith.hpp>
 #include <blas.hpp>
-#include <cast.hpp>
 #include <common/ArrayInfo.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
+#include <common/moddims.hpp>
 #include <diagonal.hpp>
 #include <handle.hpp>
 #include <logic.hpp>
@@ -31,10 +32,28 @@
 
 using af::dim4;
 using af::dtype_traits;
+using common::cast;
+using common::modDims;
+using detail::arithOp;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::createSelectNode;
+using detail::createSubArray;
+using detail::createValueArray;
+using detail::diagCreate;
+using detail::gemm;
+using detail::logicOp;
+using detail::max;
+using detail::min;
+using detail::reduce;
+using detail::scalar;
+using detail::svd;
+using detail::tile;
+using detail::uint;
 using std::swap;
 using std::vector;
-
-using namespace detail;
 
 template<typename T>
 Array<T> getSubArray(const Array<T> &in, const bool copy, uint dim0begin = 0,
@@ -59,7 +78,7 @@ Array<T> pinverseSvd(const Array<T> &in, const double tol) {
     dim_t Q = in.dims()[3];
 
     // Compute SVD
-    typedef typename dtype_traits<T>::base_type Tr;
+    using Tr = typename dtype_traits<T>::base_type;
     // Ideally, these initializations should use createEmptyArray(), but for
     // some reason, linux-opencl-k80 will produce wrong results for large arrays
     Array<T> u  = createValueArray<T>(dim4(M, M, P, Q), scalar<T>(0));
@@ -129,11 +148,13 @@ Array<T> pinverseSvd(const Array<T> &in, const double tol) {
                          0, uT.dims()[2] - 1, 0, uT.dims()[3] - 1);
     }
 
-    Array<T> vsPinv = createEmptyArray<T>(dim4(v.dims()[0], sPinv.dims()[1], P, Q));
-    Array<T> out    = createEmptyArray<T>(dim4(vsPinv.dims()[0], uT.dims()[1], P, Q));
+    Array<T> vsPinv =
+        createEmptyArray<T>(dim4(v.dims()[0], sPinv.dims()[1], P, Q));
+    Array<T> out =
+        createEmptyArray<T>(dim4(vsPinv.dims()[0], uT.dims()[1], P, Q));
 
     T alpha = scalar<T>(1.0);
-    T beta = scalar<T>(0.0);
+    T beta  = scalar<T>(0.0);
 
     gemm<T>(vsPinv, AF_MAT_NONE, AF_MAT_NONE, &alpha, v, sPinv, &beta);
     gemm<T>(out, AF_MAT_NONE, AF_MAT_NONE, &alpha, vsPinv, uT, &beta);

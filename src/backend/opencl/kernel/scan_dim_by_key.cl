@@ -7,15 +7,15 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-char calculate_head_flags_dim(const __global Tk *kptr, int id, int stride) {
+char calculate_head_flags_dim(const global Tk *kptr, int id, int stride) {
     return (id == 0) ? 1 : ((*kptr) != (*(kptr - stride)));
 }
 
-__kernel void scan_dim_by_key_nonfinal_kernel(
-    __global To *oData, KParam oInfo, __global To *tData, KParam tInfo,
-    __global char *tfData, KParam tfInfo, __global int *tiData, KParam tiInfo,
-    const __global Ti *iData, KParam iInfo, const __global Tk *kData,
-    KParam kInfo, uint groups_x, uint groups_y, uint groups_dim, uint lim) {
+kernel void scanDimByKeyNonfinal(
+    global To *oData, KParam oInfo, global To *tData, KParam tInfo,
+    global char *tfData, KParam tfInfo, global int *tiData, KParam tiInfo,
+    const global Ti *iData, KParam iInfo, const global Tk *kData, KParam kInfo,
+    uint groups_x, uint groups_y, uint groups_dim, uint lim) {
     const int lidx = get_local_id(0);
     const int lidy = get_local_id(1);
     const int lid  = lidy * THREADS_X + lidx;
@@ -31,7 +31,7 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
 
     // There is only one element per group for out
     // There are DIMY elements per group for in
-    // Hence increment ids[dim] just after offseting out and before offsetting
+    // Hence increment ids[kDim] just after offseting out and before offsetting
     // in
     tData += ids[3] * tInfo.strides[3] + ids[2] * tInfo.strides[2] +
              ids[1] * tInfo.strides[1] + ids[0];
@@ -39,9 +39,9 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
               ids[1] * tfInfo.strides[1] + ids[0];
     tiData += ids[3] * tiInfo.strides[3] + ids[2] * tiInfo.strides[2] +
               ids[1] * tiInfo.strides[1] + ids[0];
-    const int groupId_dim = ids[dim];
+    const int groupId_dim = ids[kDim];
 
-    ids[dim] = ids[dim] * DIMY * lim + lidy;
+    ids[kDim] = ids[kDim] * DIMY * lim + lidy;
     oData += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] +
              ids[1] * oInfo.strides[1] + ids[0];
     iData += ids[3] * iInfo.strides[3] + ids[2] * iInfo.strides[2] +
@@ -50,24 +50,24 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
              ids[1] * kInfo.strides[1] + ids[0];
     iData += iInfo.offset;
 
-    int id_dim        = ids[dim];
-    const int out_dim = oInfo.dims[dim];
+    int id_dim        = ids[kDim];
+    const int out_dim = oInfo.dims[kDim];
 
     bool is_valid = (ids[0] < oInfo.dims[0]) && (ids[1] < oInfo.dims[1]) &&
                     (ids[2] < oInfo.dims[2]) && (ids[3] < oInfo.dims[3]);
 
-    const int ostride_dim = oInfo.strides[dim];
-    const int istride_dim = iInfo.strides[dim];
+    const int ostride_dim = oInfo.strides[kDim];
+    const int istride_dim = iInfo.strides[kDim];
 
-    __local To l_val0[THREADS_X * DIMY];
-    __local To l_val1[THREADS_X * DIMY];
-    __local char l_flg0[THREADS_X * DIMY];
-    __local char l_flg1[THREADS_X * DIMY];
-    __local To *l_val   = l_val0;
-    __local char *l_flg = l_flg0;
-    __local To l_tmp[THREADS_X];
-    __local char l_ftmp[THREADS_X];
-    __local int boundaryid[THREADS_X];
+    local To l_val0[THREADS_X * DIMY];
+    local To l_val1[THREADS_X * DIMY];
+    local char l_flg0[THREADS_X * DIMY];
+    local char l_flg1[THREADS_X * DIMY];
+    local To *l_val   = l_val0;
+    local char *l_flg = l_flg0;
+    local To l_tmp[THREADS_X];
+    local char l_ftmp[THREADS_X];
+    local int boundaryid[THREADS_X];
 
     bool flip         = 0;
     const To init_val = init;
@@ -86,13 +86,13 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
         bool cond = (is_valid) && (id_dim < out_dim);
 
         if (cond) {
-            flag = calculate_head_flags_dim(kData, id_dim, kInfo.strides[dim]);
+            flag = calculate_head_flags_dim(kData, id_dim, kInfo.strides[kDim]);
         } else {
             flag = 0;
         }
 
         // Load val from global in
-        if (inclusive_scan) {
+        if (INCLUSIVE_SCAN) {
             if (!cond) {
                 val = init_val;
             } else {
@@ -102,7 +102,7 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
             if ((id_dim == 0) || (!cond) || flag) {
                 val = init_val;
             } else {
-                val = transform(*(iData - iInfo.strides[dim]));
+                val = transform(*(iData - iInfo.strides[kDim]));
             }
         }
 
@@ -150,13 +150,13 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
             l_ftmp[lidx] = flag;
         }
         id_dim += DIMY;
-        kData += DIMY * kInfo.strides[dim];
+        kData += DIMY * kInfo.strides[kDim];
         iData += DIMY * istride_dim;
         oData += DIMY * ostride_dim;
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (is_valid && (groupId_dim < tInfo.dims[dim]) && isLast) {
+    if (is_valid && (groupId_dim < tInfo.dims[kDim]) && isLast) {
         *tData       = val;
         *tfData      = flag;
         int boundary = boundaryid[lidx];
@@ -164,10 +164,11 @@ __kernel void scan_dim_by_key_nonfinal_kernel(
     }
 }
 
-__kernel void scan_dim_by_key_final_kernel(
-    __global To *oData, KParam oInfo, const __global Ti *iData, KParam iInfo,
-    const __global Tk *kData, KParam kInfo, uint groups_x, uint groups_y,
-    uint groups_dim, uint lim) {
+kernel void scanDimByKeyFinal(global To *oData, KParam oInfo,
+                              const global Ti *iData, KParam iInfo,
+                              const global Tk *kData, KParam kInfo,
+                              uint groups_x, uint groups_y, uint groups_dim,
+                              uint lim) {
     const int lidx = get_local_id(0);
     const int lidy = get_local_id(1);
     const int lid  = lidy * THREADS_X + lidx;
@@ -183,11 +184,11 @@ __kernel void scan_dim_by_key_final_kernel(
 
     // There is only one element per group for out
     // There are DIMY elements per group for in
-    // Hence increment ids[dim] just after offseting out and before offsetting
+    // Hence increment ids[kDim] just after offseting out and before offsetting
     // in
-    const int groupId_dim = ids[dim];
+    const int groupId_dim = ids[kDim];
 
-    ids[dim] = ids[dim] * DIMY * lim + lidy;
+    ids[kDim] = ids[kDim] * DIMY * lim + lidy;
     oData += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] +
              ids[1] * oInfo.strides[1] + ids[0];
     iData += ids[3] * iInfo.strides[3] + ids[2] * iInfo.strides[2] +
@@ -196,23 +197,23 @@ __kernel void scan_dim_by_key_final_kernel(
              ids[1] * kInfo.strides[1] + ids[0];
     iData += iInfo.offset;
 
-    int id_dim        = ids[dim];
-    const int out_dim = oInfo.dims[dim];
+    int id_dim        = ids[kDim];
+    const int out_dim = oInfo.dims[kDim];
 
     bool is_valid = (ids[0] < oInfo.dims[0]) && (ids[1] < oInfo.dims[1]) &&
                     (ids[2] < oInfo.dims[2]) && (ids[3] < oInfo.dims[3]);
 
-    const int ostride_dim = oInfo.strides[dim];
-    const int istride_dim = iInfo.strides[dim];
+    const int ostride_dim = oInfo.strides[kDim];
+    const int istride_dim = iInfo.strides[kDim];
 
-    __local To l_val0[THREADS_X * DIMY];
-    __local To l_val1[THREADS_X * DIMY];
-    __local char l_flg0[THREADS_X * DIMY];
-    __local char l_flg1[THREADS_X * DIMY];
-    __local To *l_val   = l_val0;
-    __local char *l_flg = l_flg0;
-    __local To l_tmp[THREADS_X];
-    __local char l_ftmp[THREADS_X];
+    local To l_val0[THREADS_X * DIMY];
+    local To l_val1[THREADS_X * DIMY];
+    local char l_flg0[THREADS_X * DIMY];
+    local char l_flg1[THREADS_X * DIMY];
+    local To *l_val   = l_val0;
+    local char *l_flg = l_flg0;
+    local To l_tmp[THREADS_X];
+    local char l_ftmp[THREADS_X];
 
     bool flip         = 0;
     const To init_val = init;
@@ -231,8 +232,8 @@ __kernel void scan_dim_by_key_final_kernel(
 
         if (calculateFlags) {
             if (cond) {
-                flag =
-                    calculate_head_flags_dim(kData, id_dim, kInfo.strides[dim]);
+                flag = calculate_head_flags_dim(kData, id_dim,
+                                                kInfo.strides[kDim]);
             } else {
                 flag = 0;
             }
@@ -241,7 +242,7 @@ __kernel void scan_dim_by_key_final_kernel(
         }
 
         // Load val from global in
-        if (inclusive_scan) {
+        if (INCLUSIVE_SCAN) {
             if (!cond) {
                 val = init_val;
             } else {
@@ -251,7 +252,7 @@ __kernel void scan_dim_by_key_final_kernel(
             if ((id_dim == 0) || (!cond) || flag) {
                 val = init_val;
             } else {
-                val = transform(*(iData - iInfo.strides[dim]));
+                val = transform(*(iData - iInfo.strides[kDim]));
             }
         }
 
@@ -287,18 +288,18 @@ __kernel void scan_dim_by_key_final_kernel(
             l_ftmp[lidx] = flag;
         }
         id_dim += DIMY;
-        kData += DIMY * kInfo.strides[dim];
+        kData += DIMY * kInfo.strides[kDim];
         iData += DIMY * istride_dim;
         oData += DIMY * ostride_dim;
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
 
-__kernel void bcast_dim_kernel(__global To *oData, KParam oInfo,
-                               const __global To *tData, KParam tInfo,
-                               const __global int *tiData, KParam tiInfo,
-                               uint groups_x, uint groups_y, uint groups_dim,
-                               uint lim) {
+kernel void bcastDimByKey(global To *oData, KParam oInfo,
+                          const global To *tData, KParam tInfo,
+                          const global int *tiData, KParam tiInfo,
+                          uint groups_x, uint groups_y, uint groups_dim,
+                          uint lim) {
     const int lidx = get_local_id(0);
     const int lidy = get_local_id(1);
     const int lid  = lidy * THREADS_X + lidx;
@@ -311,32 +312,32 @@ __kernel void bcast_dim_kernel(__global To *oData, KParam oInfo,
     const int yid       = groupId_y;
 
     int ids[4]            = {xid, yid, zid, wid};
-    const int groupId_dim = ids[dim];
+    const int groupId_dim = ids[kDim];
 
     if (groupId_dim != 0) {
         // There is only one element per group for out
         // There are DIMY elements per group for in
-        // Hence increment ids[dim] just after offseting out and before
+        // Hence increment ids[kDim] just after offseting out and before
         // offsetting in
         tiData += ids[3] * tiInfo.strides[3] + ids[2] * tiInfo.strides[2] +
                   ids[1] * tiInfo.strides[1] + ids[0];
         tData += ids[3] * tInfo.strides[3] + ids[2] * tInfo.strides[2] +
                  ids[1] * tInfo.strides[1] + ids[0];
 
-        ids[dim] = ids[dim] * DIMY * lim + lidy;
+        ids[kDim] = ids[kDim] * DIMY * lim + lidy;
         oData += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] +
                  ids[1] * oInfo.strides[1] + ids[0];
 
-        const int id_dim = ids[dim];
+        const int id_dim = ids[kDim];
 
         bool is_valid = (ids[0] < oInfo.dims[0]) && (ids[1] < oInfo.dims[1]) &&
                         (ids[2] < oInfo.dims[2]) && (ids[3] < oInfo.dims[3]);
 
         if (is_valid) {
             int boundary = *tiData;
-            To accum     = *(tData - tInfo.strides[dim]);
+            To accum     = *(tData - tInfo.strides[kDim]);
 
-            const int ostride_dim = oInfo.strides[dim];
+            const int ostride_dim = oInfo.strides[kDim];
 
             for (int k = 0, id = id_dim; is_valid && k < lim && (id < boundary);
                  k++, id += DIMY) {

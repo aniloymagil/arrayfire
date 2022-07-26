@@ -6,43 +6,47 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-#include <kernel/triangle.hpp>
 #include <triangle.hpp>
 
-#include <Array.hpp>
 #include <common/half.hpp>
-#include <math.hpp>
+#include <kernel/triangle.hpp>
 #include <platform.hpp>
 #include <af/dim4.hpp>
+
+#include <functional>
 
 using common::half;
 
 namespace cpu {
 
-template<typename T, bool is_upper, bool is_unit_diag>
-void triangle(Array<T> &out, const Array<T> &in) {
-    getQueue().enqueue(kernel::triangle<T, is_upper, is_unit_diag>, out, in);
+template<typename T>
+using triangleFunc = std::function<void(Param<T>, CParam<T>)>;
+
+template<typename T>
+void triangle(Array<T> &out, const Array<T> &in, const bool is_upper,
+              const bool is_unit_diag) {
+    static const triangleFunc<T> funcs[4] = {
+        kernel::triangle<T, false, false>,
+        kernel::triangle<T, false, true>,
+        kernel::triangle<T, true, false>,
+        kernel::triangle<T, true, true>,
+    };
+    const int funcIdx = is_upper * 2 + is_unit_diag;
+    getQueue().enqueue(funcs[funcIdx], out, in);
 }
 
-template<typename T, bool is_upper, bool is_unit_diag>
-Array<T> triangle(const Array<T> &in) {
+template<typename T>
+Array<T> triangle(const Array<T> &in, const bool is_upper,
+                  const bool is_unit_diag) {
     Array<T> out = createEmptyArray<T>(in.dims());
-    triangle<T, is_upper, is_unit_diag>(out, in);
+    triangle<T>(out, in, is_upper, is_unit_diag);
     return out;
 }
 
-#define INSTANTIATE(T)                                                         \
-    template void triangle<T, true, true>(Array<T> & out, const Array<T> &in); \
-    template void triangle<T, false, true>(Array<T> & out,                     \
-                                           const Array<T> &in);                \
-    template void triangle<T, true, false>(Array<T> & out,                     \
-                                           const Array<T> &in);                \
-    template void triangle<T, false, false>(Array<T> & out,                    \
-                                            const Array<T> &in);               \
-    template Array<T> triangle<T, true, true>(const Array<T> &in);             \
-    template Array<T> triangle<T, false, true>(const Array<T> &in);            \
-    template Array<T> triangle<T, true, false>(const Array<T> &in);            \
-    template Array<T> triangle<T, false, false>(const Array<T> &in);
+#define INSTANTIATE(T)                                                  \
+    template void triangle<T>(Array<T> &, const Array<T> &, const bool, \
+                              const bool);                              \
+    template Array<T> triangle<T>(const Array<T> &, const bool, const bool);
 
 INSTANTIATE(float)
 INSTANTIATE(double)

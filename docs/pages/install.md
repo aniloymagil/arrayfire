@@ -20,13 +20,13 @@ OpenCL backend, you will need to have the OpenCL **runtime** installed on your
 system. Drivers and runtimes should be downloaded and installed from your device
 vendor’s website.
 
-# Install Instructions
+# Install Instructions {#InstallInstructions}
 
 * [Windows](#Windows)
 * [Linux](#Linux)
 * [macOS](#macOS)
 
-## <a name="Windows"></a> Windows
+## Windows {#Windows}
 
 Prior to installing ArrayFire on Windows,
 [download](https://www.microsoft.com/en-in/download/details.aspx?id=48145)
@@ -35,24 +35,32 @@ install the Visual Studio 2015 (x64) runtime libraries.
 Once you have downloaded the ArrayFire installer, execute the installer as you
 normally would on Windows. If you choose not to modify the path during the
 installation procedure, you'll need to manually add ArrayFire to the path for
-all users. Simply append `%AF_PATH%/lib` to the PATH variable so that the loader
+all users. Simply append `%%AF_PATH%/lib` to the PATH variable so that the loader
 can find ArrayFire DLLs.
 
 For more information on using ArrayFire on Windows, visit the following
 [page](http://arrayfire.org/docs/using_on_windows.htm).
 
-## <a name="Linux"></a> Linux
+## Linux {#Linux}
 
-Once you have downloaded the ArrayFire installer, execute the installer from the
-terminal as shown below. Set the `--prefix` argument to the directory you would
-like to install ArrayFire to - we recommend `/opt`.
+There are two ways to install ArrayFire on Linux.
+1. Package Manager
+2. Using ArrayFire Linux Installer
+
+As of today, approach (1) is only supported for Ubuntu 18.04 and 20.04. Please go
+through [our GitHub wiki page](https://github.com/arrayfire/arrayfire/wiki/Install-ArrayFire-From-Linux-Package-Managers)
+for the detailed instructions.
+
+For approach (2), once you have downloaded the ArrayFire installer, execute the
+installer from the terminal as shown below. Set the `--prefix` argument to the
+directory you would like to install ArrayFire to - we recommend `/opt`.
 
     ./Arrayfire_*_Linux_x86_64.sh --include-subdir --prefix=/opt
 
 Given sudo permissions, you can add the ArrayFire libraries via `ldconfig` like
 so:
 
-    echo /opt/arrayfire/lib > /etc/ld.so.conf.d/arrayfire.conf
+    echo /opt/arrayfire/lib64 > /etc/ld.so.conf.d/arrayfire.conf
     sudo ldconfig
 
 Otherwise, you will need to set the `LD_LIBRARY_PATH` environment variable in
@@ -82,7 +90,7 @@ __Fedora, Redhat, CentOS__
     yum install freeimage fontconfig mesa-libGLU
 
 
-## <a name="macOS"></a> macOS
+## macOS {#macOS}
 
 Once you have downloaded the ArrayFire installer, execute the installer by
 either double clicking on the ArrayFire `pkg` file or running the following

@@ -9,13 +9,14 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
+#include <common/half.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <math.hpp>
 #include <mean.hpp>
 #include <reduce.hpp>
-#include <tile.hpp>
 #include <af/defines.h>
 #include <af/dim4.hpp>
 #include <af/statistics.h>
@@ -24,18 +25,38 @@
 
 #include <tuple>
 
-using namespace detail;
-
+using af::dim4;
+using common::cast;
+using common::half;
+using detail::arithOp;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using detail::createValueArray;
+using detail::division;
+using detail::getScalar;
+using detail::imag;
+using detail::intl;
+using detail::mean;
+using detail::real;
+using detail::reduce;
+using detail::reduce_all;
+using detail::scalar;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 using std::ignore;
 using std::make_tuple;
 using std::tie;
 using std::tuple;
 
 template<typename inType, typename outType>
-static outType varAll(const af_array& in, const bool isbiased) {
-    typedef typename baseOutType<outType>::type weightType;
-    Array<inType> inArr  = getArray<inType>(in);
-    Array<outType> input = cast<outType>(inArr);
+static outType varAll(const af_array& in, const af_var_bias bias) {
+    using weightType          = typename baseOutType<outType>::type;
+    const Array<inType> inArr = getArray<inType>(in);
+    Array<outType> input      = cast<outType>(inArr);
 
     Array<outType> meanCnst = createValueArray<outType>(
         input.dims(), mean<inType, weightType, outType>(inArr));
@@ -45,22 +66,23 @@ static outType varAll(const af_array& in, const bool isbiased) {
 
     Array<outType> diffSq = arithOp<outType, af_mul_t>(diff, diff, diff.dims());
 
-    outType result =
-        division(reduce_all<af_add_t, outType, outType>(diffSq),
-                 isbiased ? input.elements() : input.elements() - 1);
+    outType result = division(
+        getScalar<outType>(reduce_all<af_add_t, outType, outType>(diffSq)),
+        (input.elements() - (bias == AF_VARIANCE_SAMPLE)));
 
     return result;
 }
 
 template<typename inType, typename outType>
 static outType varAll(const af_array& in, const af_array weights) {
-    typedef typename baseOutType<outType>::type bType;
+    using bType = typename baseOutType<outType>::type;
 
     Array<outType> input = cast<outType>(getArray<inType>(in));
     Array<outType> wts   = cast<outType>(getArray<bType>(weights));
 
-    bType wtsSum = reduce_all<af_add_t, bType, bType>(getArray<bType>(weights));
-    outType wtdMean = mean<outType, bType>(input, getArray<bType>(weights));
+    bType wtsSum = getScalar<bType>(
+        reduce_all<af_add_t, bType, bType>(getArray<bType>(weights)));
+    auto wtdMean = mean<outType, bType>(input, getArray<bType>(weights));
 
     Array<outType> meanArr = createValueArray<outType>(input.dims(), wtdMean);
     Array<outType> diff =
@@ -70,8 +92,9 @@ static outType varAll(const af_array& in, const af_array weights) {
     Array<outType> accDiffSq =
         arithOp<outType, af_mul_t>(diffSq, wts, diffSq.dims());
 
-    outType result =
-        division(reduce_all<af_add_t, outType, outType>(accDiffSq), wtsSum);
+    outType result = division(
+        getScalar<outType>(reduce_all<af_add_t, outType, outType>(accDiffSq)),
+        wtsSum);
 
     return result;
 }
@@ -81,7 +104,7 @@ static tuple<Array<outType>, Array<outType>> meanvar(
     const Array<inType>& in,
     const Array<typename baseOutType<outType>::type>& weights,
     const af_var_bias bias, const dim_t dim) {
-    typedef typename baseOutType<outType>::type weightType;
+    using weightType     = typename baseOutType<outType>::type;
     Array<outType> input = cast<outType>(in);
     dim4 iDims           = input.dims();
 
@@ -89,8 +112,9 @@ static tuple<Array<outType>, Array<outType>> meanvar(
     Array<outType> normArr = createEmptyArray<outType>({0});
     if (weights.isEmpty()) {
         meanArr  = mean<outType, weightType, outType>(input, dim);
-        auto val = 1.0 / (bias == AF_VARIANCE_POPULATION ? iDims[dim]
-                                                         : iDims[dim] - 1);
+        auto val = 1.0 / static_cast<double>(bias == AF_VARIANCE_POPULATION
+                                                 ? iDims[dim]
+                                                 : iDims[dim] - 1);
         normArr =
             createValueArray<outType>(meanArr.dims(), scalar<outType>(val));
     } else {
@@ -105,14 +129,8 @@ static tuple<Array<outType>, Array<outType>> meanvar(
         normArr = arithOp<outType, af_div_t>(ones, wtsSum, meanArr.dims());
     }
 
-    /* now tile meanArr along dim and use it for variance computation */
-    dim4 tileDims(1);
-    tileDims[dim]           = iDims[dim];
-    Array<outType> tMeanArr = tile<outType>(meanArr, tileDims);
-    /* now mean array is ready */
-
     Array<outType> diff =
-        arithOp<outType, af_sub_t>(input, tMeanArr, tMeanArr.dims());
+        arithOp<outType, af_sub_t>(input, meanArr, input.dims());
     Array<outType> diffSq = arithOp<outType, af_mul_t>(diff, diff, diff.dims());
     Array<outType> redDiff = reduce<af_add_t, outType, outType>(diffSq, dim);
 
@@ -127,7 +145,7 @@ static tuple<af_array, af_array> meanvar(const af_array& in,
                                          const af_array& weights,
                                          const af_var_bias bias,
                                          const dim_t dim) {
-    typedef typename baseOutType<outType>::type weightType;
+    using weightType    = typename baseOutType<outType>::type;
     Array<outType> mean = createEmptyArray<outType>({0}),
                    var  = createEmptyArray<outType>({0});
 
@@ -160,14 +178,20 @@ static af_array var_(const af_array& in, const af_array& weights,
         Array<bType> empty = createEmptyArray<bType>({0});
         return getHandle(
             var<inType, outType>(getArray<inType>(in), empty, bias, dim));
-    } else {
-        return getHandle(var<inType, outType>(
-            getArray<inType>(in), getArray<bType>(weights), bias, dim));
     }
+    return getHandle(var<inType, outType>(getArray<inType>(in),
+                                          getArray<bType>(weights), bias, dim));
 }
 
 af_err af_var(af_array* out, const af_array in, const bool isbiased,
               const dim_t dim) {
+    const af_var_bias bias =
+        (isbiased ? AF_VARIANCE_SAMPLE : AF_VARIANCE_POPULATION);
+    return af_var_v2(out, in, bias, dim);
+}
+
+af_err af_var_v2(af_array* out, const af_array in, const af_var_bias bias,
+                 const dim_t dim) {
     try {
         ARG_ASSERT(3, (dim >= 0 && dim <= 3));
 
@@ -176,8 +200,6 @@ af_err af_var(af_array* out, const af_array in, const bool isbiased,
         af_dtype type         = info.getType();
 
         af_array no_weights = 0;
-        af_var_bias bias =
-            (isbiased) ? AF_VARIANCE_POPULATION : AF_VARIANCE_SAMPLE;
         switch (type) {
             case f32:
                 output = var_<float, float>(in, no_weights, bias, dim);
@@ -214,6 +236,9 @@ af_err af_var(af_array* out, const af_array in, const bool isbiased,
                 break;
             case c64:
                 output = var_<cdouble, cdouble>(in, no_weights, bias, dim);
+                break;
+            case f16:
+                output = var_<half, half>(in, no_weights, bias, dim);
                 break;
             default: TYPE_ERROR(1, type);
         }
@@ -281,6 +306,10 @@ af_err af_var_weighted(af_array* out, const af_array in, const af_array weights,
                 output =
                     var_<char, float>(in, weights, AF_VARIANCE_POPULATION, dim);
                 break;
+            case f16:
+                output =
+                    var_<half, float>(in, weights, AF_VARIANCE_POPULATION, dim);
+                break;
             case c32:
                 output = var_<cfloat, cfloat>(in, weights,
                                               AF_VARIANCE_POPULATION, dim);
@@ -299,27 +328,35 @@ af_err af_var_weighted(af_array* out, const af_array in, const af_array weights,
 
 af_err af_var_all(double* realVal, double* imagVal, const af_array in,
                   const bool isbiased) {
+    const af_var_bias bias =
+        (isbiased ? AF_VARIANCE_SAMPLE : AF_VARIANCE_POPULATION);
+    return af_var_all_v2(realVal, imagVal, in, bias);
+}
+
+af_err af_var_all_v2(double* realVal, double* imagVal, const af_array in,
+                     const af_var_bias bias) {
     try {
         const ArrayInfo& info = getInfo(in);
         af_dtype type         = info.getType();
         switch (type) {
-            case f64: *realVal = varAll<double, double>(in, isbiased); break;
-            case f32: *realVal = varAll<float, float>(in, isbiased); break;
-            case s32: *realVal = varAll<int, float>(in, isbiased); break;
-            case u32: *realVal = varAll<uint, float>(in, isbiased); break;
-            case s16: *realVal = varAll<short, float>(in, isbiased); break;
-            case u16: *realVal = varAll<ushort, float>(in, isbiased); break;
-            case s64: *realVal = varAll<intl, double>(in, isbiased); break;
-            case u64: *realVal = varAll<uintl, double>(in, isbiased); break;
-            case u8: *realVal = varAll<uchar, float>(in, isbiased); break;
-            case b8: *realVal = varAll<char, float>(in, isbiased); break;
+            case f64: *realVal = varAll<double, double>(in, bias); break;
+            case f32: *realVal = varAll<float, float>(in, bias); break;
+            case s32: *realVal = varAll<int, float>(in, bias); break;
+            case u32: *realVal = varAll<uint, float>(in, bias); break;
+            case s16: *realVal = varAll<short, float>(in, bias); break;
+            case u16: *realVal = varAll<ushort, float>(in, bias); break;
+            case s64: *realVal = varAll<intl, double>(in, bias); break;
+            case u64: *realVal = varAll<uintl, double>(in, bias); break;
+            case u8: *realVal = varAll<uchar, float>(in, bias); break;
+            case b8: *realVal = varAll<char, float>(in, bias); break;
+            case f16: *realVal = varAll<half, float>(in, bias); break;
             case c32: {
-                cfloat tmp = varAll<cfloat, cfloat>(in, isbiased);
+                cfloat tmp = varAll<cfloat, cfloat>(in, bias);
                 *realVal   = real(tmp);
                 *imagVal   = imag(tmp);
             } break;
             case c64: {
-                cdouble tmp = varAll<cdouble, cdouble>(in, isbiased);
+                cdouble tmp = varAll<cdouble, cdouble>(in, bias);
                 *realVal    = real(tmp);
                 *imagVal    = imag(tmp);
             } break;
@@ -355,6 +392,7 @@ af_err af_var_all_weighted(double* realVal, double* imagVal, const af_array in,
             case u64: *realVal = varAll<uintl, double>(in, weights); break;
             case u8: *realVal = varAll<uchar, float>(in, weights); break;
             case b8: *realVal = varAll<char, float>(in, weights); break;
+            case f16: *realVal = varAll<half, float>(in, weights); break;
             case c32: {
                 cfloat tmp = varAll<cfloat, cfloat>(in, weights);
                 *realVal   = real(tmp);
@@ -429,6 +467,9 @@ af_err af_meanvar(af_array* mean, af_array* var, const af_array in,
             case c64:
                 tie(*mean, *var) =
                     meanvar<cdouble, cdouble>(in, weights, bias, dim);
+                break;
+            case f16:
+                tie(*mean, *var) = meanvar<half, half>(in, weights, bias, dim);
                 break;
             default: TYPE_ERROR(1, iType);
         }

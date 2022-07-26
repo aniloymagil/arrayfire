@@ -7,10 +7,10 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <debug_thrust.hpp>
 #include <debug_cuda.hpp>
 #include <kernel/thrust_sort_by_key.hpp>
 #include <thrust/sort.h>
+#include <thrust_utils.hpp>
 #include <types.hpp>
 
 namespace cuda {

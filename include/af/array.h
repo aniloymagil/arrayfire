@@ -10,12 +10,21 @@
 #pragma once
 #include <af/compilers.h>
 #include <af/defines.h>
+#include <af/device.h>
+#include <af/dim4.hpp>
+#include <af/exception.h>
 #include <af/index.h>
 #include <af/seq.h>
 #include <af/util.h>
 
 #ifdef __cplusplus
 #include <af/traits.hpp>
+
+#if AF_API_VERSION >= 38
+#if AF_COMPILER_CXX_GENERALIZED_INITIALIZERS
+#include <initializer_list>
+#endif
+#endif
 
 namespace af
 {
@@ -24,7 +33,7 @@ namespace af
 
     ///
     /// \brief A multi dimensional data container
-    ///
+    /// \ingroup arrayfire_class
     class AFAPI array {
         af_array   arr;
 
@@ -41,7 +50,8 @@ namespace af
         ///
         /// \brief Intermediate data class. Used for assignment and indexing.
         ///
-        /// \note This class is for internal book keeping while indexing. This class is not intended for use in user code.
+        /// \note This class is for internal book keeping while indexing. This
+        ///       class is not intended for use in user code.
         ///
         class AFAPI array_proxy
         {
@@ -163,11 +173,6 @@ namespace af
             const array::array_proxy slices(int first, int last) const;
         };
 
-        //array(af_array in, const array *par, af_index_t seqs[4]);
-        /**
-            \ingroup construct_mat
-            @{
-        */
         /**
             Create an uninitialized array (no data, undefined size)
 
@@ -203,9 +208,9 @@ namespace af
 #endif
 #endif
         /**
-            Creates an array from an \ref af_array handle. Does not increment 
-            a reference counter: the array assumes ownership of the handle. To 
-            share the array between multiple objects, use this in conjunction 
+            Creates an array from an \ref af_array handle. Does not increment
+            a reference counter: the array assumes ownership of the handle. To
+            share the array between multiple objects, use this in conjunction
             with \ref af_retain_array.
             \param handle the af_array object.
          */
@@ -370,7 +375,10 @@ namespace af
 
             \endcode
 
-            \note If \p src is \ref afHost, the first \p dim0 elements are copied. If \p src is \ref afDevice, no copy is done; the array object wraps the device pointer AND takes ownership of the underlying memory.
+            \note If \p src is \ref afHost, the first \p dim0 elements are
+                  copied. If \p src is \ref afDevice, no copy is done; the
+                  array object wraps the device pointer AND takes ownership
+                  of the underlying memory.
 
         */
         template<typename T>
@@ -394,7 +402,11 @@ namespace af
 
             \image html 2dArray.png
 
-            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 elements are copied. If \p src is \ref afDevice, no copy is done; the array object wraps the device pointer AND takes ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 elements
+                  are copied. If \p src is \ref afDevice, no copy is done; the
+                  array object wraps the device pointer AND takes ownership of
+                  the underlying memory. The data is treated as column major
+                  format when performing linear algebra operations.
         */
         template<typename T>
         array(dim_t dim0, dim_t dim1,
@@ -418,7 +430,12 @@ namespace af
             array A(3, 3, 2,  h_buffer);   // copy host data to 3D device array
             \endcode
 
-            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 * \p dim2 elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 *
+                  \p dim2 elements are copied. If \p src is \ref afDevice, no
+                  copy is done; the array object just wraps the device pointer
+                  and does not take ownership of the underlying memory. The data
+                  is treated as column major format when performing linear
+                  algebra operations.
 
             \image html 3dArray.png
         */
@@ -447,7 +464,13 @@ namespace af
             array A(2, 2, 2, 2, h_buffer);   // copy host data to 4D device array
             \endcode
 
-            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 * \p dim2 * \p dim3 elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
+            \note If \p src is \ref afHost, the first \p dim0 * \p dim1 *
+                  \p dim2 * \p dim3 elements are copied. If \p src is
+                  \ref afDevice, no copy is done; the array object just wraps
+                  the device pointer and does not take ownership of the
+                  underlying memory. The data is treated as column major format
+                  when performing linear algebra operations.
+
         */
         template<typename T>
         array(dim_t dim0, dim_t dim1, dim_t dim2, dim_t dim3,
@@ -484,12 +507,56 @@ namespace af
                                              // used in ArrayFire
             \endcode
 
-            \note If \p src is \ref afHost, the first dims.elements() elements are copied. If \p src is \ref afDevice, no copy is done; the array object just wraps the device pointer and does not take ownership of the underlying memory. The data is treated as column major format when performing linear algebra operations.
+            \note If \p src is \ref afHost, the first dims.elements() elements
+                  are copied. If \p src is \ref afDevice, no copy is done; the
+                  array object just wraps the device pointer and does not take
+                  ownership of the underlying memory. The data is treated as
+                  column major format when performing linear algebra operations.
+
         */
         template<typename T>
         explicit
         array(const dim4& dims,
               const T *pointer, af::source src=afHost);
+
+#if AF_API_VERSION >= 38
+#if AF_COMPILER_CXX_GENERALIZED_INITIALIZERS
+        /// \brief Initializer list constructor
+        template <typename T, typename = typename std::enable_if<
+                                  std::is_fundamental<T>::value, void>::type>
+        array(std::initializer_list<T> list)
+        : arr(nullptr) {
+          dim_t size = list.size();
+          if (af_err __aferr = af_create_array(&arr, list.begin(), 1, &size,
+                              static_cast<af_dtype>(af::dtype_traits<T>::af_type))) {
+            char *msg = NULL;
+            af_get_last_error(&msg, NULL);
+            af::exception ex(msg, __PRETTY_FUNCTION__, "include/af/array.h",
+                             __LINE__, __aferr);
+            af_free_host(msg);
+            throw std::move(ex);
+          }
+        }
+
+        /// \brief Initializer list constructor
+        template <typename T, typename = typename std::enable_if<
+                                  std::is_fundamental<T>::value, void>::type>
+        array(const af::dim4 &dims, std::initializer_list<T> list)
+            : arr(nullptr) {
+          const dim_t *size = dims.get();
+          if (af_err __aferr = af_create_array(
+              &arr, list.begin(), AF_MAX_DIMS, size,
+              static_cast<af_dtype>(af::dtype_traits<T>::af_type))) {
+            char *msg = NULL;
+            af_get_last_error(&msg, NULL);
+            af::exception ex(msg, __PRETTY_FUNCTION__, "include/af/array.h",
+                             __LINE__, __aferr);
+            af_free_host(msg);
+            throw std::move(ex);
+          }
+        }
+#endif
+#endif
 
         /**
            Adjust the dimensions of an N-D array (fast).
@@ -516,7 +583,6 @@ namespace af
 
            \param[in] input
            \param[in] dims total number of elements must not change.
-           \return same underlying array data with different dimensions
         */
         array(const array& input, const dim4& dims);
 
@@ -549,20 +615,10 @@ namespace af
            \param[in] dim1 second dimension
            \param[in] dim2 third dimension
            \param[in] dim3 fourth dimension
-           \return same underlying array data with different dimensions
         */
         array(  const array& input,
                 const dim_t dim0, const dim_t dim1 = 1,
                 const dim_t dim2 = 1, const dim_t dim3 = 1);
-
-        /**
-            @}
-        */
-
-        /**
-           \ingroup method_mat
-           @{
-        */
 
         /**
            get the \ref af_array handle
@@ -641,17 +697,20 @@ namespace af
         bool isscalar() const;
 
         /**
-           \brief Returns true if only one of the array dimensions has more than one element
+           \brief Returns true if only one of the array dimensions has more
+                  than one element
         */
         bool isvector() const;
 
         /**
-           \brief Returns true if only the second dimension has more than one element
+           \brief Returns true if only the second dimension has more than one
+                  element
         */
         bool isrow() const;
 
         /**
-           \brief Returns true if only the first dimension has more than one element
+           \brief Returns true if only the first dimension has more than one
+                  element
         */
         bool iscolumn() const;
 
@@ -688,12 +747,14 @@ namespace af
         bool isrealfloating() const;
 
         /**
-           \brief Returns true if the array type is \ref f16 \ref f32, \ref f64, \ref c32 or \ref c64
+           \brief Returns true if the array type is \ref f16 \ref f32, \ref f64,
+                  \ref c32 or \ref c64
         */
         bool isfloating() const;
 
         /**
-           \brief Returns true if the array type is \ref u8, \ref b8, \ref s32 \ref u32, \ref s64, \ref u64, \ref s16, \ref u16
+           \brief Returns true if the array type is \ref u8, \ref b8, \ref s32
+                  \ref u32, \ref s64, \ref u64, \ref s16, \ref u16
         */
         bool isinteger() const;
 
@@ -717,30 +778,20 @@ namespace af
         /**
            \brief Get the first element of the array as a scalar
 
-           \note This is recommended for use while debugging. Calling this method constantly reduces performance.
+           \note The scalar function is recommended for use while debugging.
+                 Calling this method often will affect performance.
         */
         template<typename T> T scalar() const;
 
         /**
-           @}
-        */
-
-
-        /**
-           \defgroup device_func_device array::device<T>
-
-           Get the device pointer from the array and lock the buffer in memory manager.
-           @{
+           \brief Get the device pointer from the array and lock the buffer in memory manager.
 
            The device memory returned by this function is not freed until unlock() is called.
 
-           \ingroup arrayfire_func
-           \ingroup device_mat
+           /note When using the OpenCL backend and using the cl_mem template argument, the
+                 delete function should be called on the pointer returned by this function.
         */
         template<typename T> T* device() const;
-        /**
-           @}
-        */
 
         // INDEXING
         // Single arguments
@@ -885,11 +936,35 @@ namespace af
         const array::array_proxy slices(int first, int last) const; ///< \copydoc slices
         /// @}
 
-        /// \brief Converts the array into another type
+        /// \brief Casts the array into another data type
         ///
-        ///  \param[in] type is the desired type(f32, s64, etc.)
+        /// \note Consecitive casting operations may be may be optimized out if
+        /// the original type of the af::array is the same as the final type.
+        /// For example if the original type is f64 which is then cast to f32
+        /// and then back to f64, then the cast to f32 will be skipped and that
+        /// operation will *NOT* be performed by ArrayFire. The following table
+        /// shows which casts will be optimized out. outer -> inner -> outer
+        /// | inner-> | f32 | f64 | c32 | c64 | s32 | u32 | u8 | b8 | s64 | u64 | s16 | u16 | f16 |
+        /// |---------|-----|-----|-----|-----|-----|-----|----|----|-----|-----|-----|-----|-----|
+        /// | f32     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+        /// | f64     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+        /// | c32     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+        /// | c64     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+        /// | s32     | x   | x   | x   | x   | x   | x   |    |    | x   | x   |     |     | x   |
+        /// | u32     | x   | x   | x   | x   | x   | x   |    |    | x   | x   |     |     | x   |
+        /// | u8      | x   | x   | x   | x   | x   | x   | x  | x  | x   | x   | x   | x   | x   |
+        /// | b8      | x   | x   | x   | x   | x   | x   | x  | x  | x   | x   | x   | x   | x   |
+        /// | s64     | x   | x   | x   | x   |     |     |    |    | x   | x   |     |     | x   |
+        /// | u64     | x   | x   | x   | x   |     |     |    |    | x   | x   |     |     | x   |
+        /// | s16     | x   | x   | x   | x   | x   | x   |    |    | x   | x   | x   | x   | x   |
+        /// | u16     | x   | x   | x   | x   | x   | x   |    |    | x   | x   | x   | x   | x   |
+        /// | f16     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+        /// If you want to avoid this behavior use af_eval after the first cast
+        /// operation. This will ensure that the cast operation is performed on
+        /// the af::array
+        ///
+        /// \param[in] type is the desired type(f32, s64, etc.)
         /// \returns an array with the type specified by \p type
-        /// \ingroup method_mat
         const array as(dtype type) const;
 
 
@@ -898,12 +973,10 @@ namespace af
         /// \brief Get the transposed the array
         ///
         /// \returns Transposed matrix
-        /// \ingroup method_mat
         array T() const;
         /// \brief Get the conjugate-transpose of the current array
         ///
         /// \returns conjugate-transpose matrix
-        /// \ingroup method_mat
         array H() const;
 
 #define ASSIGN_(OP2)                                                                      \
@@ -928,7 +1001,7 @@ namespace af
         ASSIGN_(OP)                                                                       \
           array& OP(const short  &val);              /**< \copydoc OP##(const array &) */ \
           array& OP(const unsigned short &val);
- 
+
 #else
 #define ASSIGN(OP) ASSIGN_(OP)
 #endif
@@ -1012,6 +1085,15 @@ namespace af
         ///
         /// \returns an \ref array with negated values
         array operator !() const;
+
+#if AF_API_VERSION >= 38
+        ///
+        /// \brief Performs a bitwise not operation on the values of the array
+        /// \ingroup arith_func_bitnot
+        ///
+        /// \returns an \ref array with inverted values
+        array operator ~() const;
+#endif
 
         ///
         /// \brief Get the count of non-zero elements in the array
@@ -1371,7 +1453,7 @@ namespace af
 
     /// Evaluate an expression (nonblocking).
     /**
-       \ingroup method_mat
+       \ingroup data_mat
        @{
     */
     inline array &eval(array &a) { a.eval(); return a; }
@@ -1437,10 +1519,6 @@ namespace af
 #if AF_API_VERSION >= 37
 
     /// Evaluate an expression (nonblocking).
-    /**
-       \ingroup method_mat
-       @{
-    */
     inline const array &eval(const array &a) { a.eval(); return a; }
 
 #if AF_COMPILER_CXX_VARIADIC_TEMPLATES
@@ -1511,14 +1589,14 @@ extern "C" {
 #endif
 
     /**
-       \ingroup construct_mat
+       \ingroup c_api_mat
        @{
     */
 
     /**
        Create an \ref af_array handle initialized with user defined data
 
-       This function will create an \ref af_array handle from the memory provided in \p data
+       This function will create an \ref af_array handle from the memory provided in \p data.
 
        \param[out]  arr The pointer to the returned object.
        \param[in]   data The data which will be loaded into the array
@@ -1533,6 +1611,9 @@ extern "C" {
     /**
        Create af_array handle
 
+       To release the memory allocated by this call you would have to
+       call \ref af_release_array once your use of this \ref af_array is complete.
+
        \param[out]  arr The pointer to the retured object.
        \param[in]   ndims The number of dimensions read from the \p dims parameter
        \param[in]   dims A C pointer with \p ndims elements. Each value represents the size of that dimension
@@ -1543,13 +1624,6 @@ extern "C" {
     AFAPI af_err af_create_handle(af_array *arr, const unsigned ndims, const dim_t * const dims, const af_dtype type);
 
     /**
-    @}
-    */
-
-    /**
-       \ingroup method_mat
-       @{
-
        Deep copy an array to another
     */
     AFAPI af_err af_copy_array(af_array *arr, const af_array in);
@@ -1580,33 +1654,21 @@ extern "C" {
 
 #if AF_API_VERSION >= 31
     /**
-       \ingroup method_mat
-       @{
-
        Get the reference count of \ref af_array
     */
     AFAPI af_err af_get_data_ref_count(int *use_count, const af_array in);
 #endif
-
 
     /**
        Evaluate any expressions in the Array
     */
     AFAPI af_err af_eval(af_array in);
 
-    /**
-      @}
-    */
-
-
 #if AF_API_VERSION >= 34
     /**
        Evaluate multiple arrays together
     */
     AFAPI af_err af_eval_multiple(const int num, af_array *arrays);
-    /**
-      @}
-    */
 #endif
 
 #if AF_API_VERSION >= 34
@@ -1614,9 +1676,6 @@ extern "C" {
        Turn the manual eval flag on or off
     */
     AFAPI af_err af_set_manual_eval_flag(bool flag);
-    /**
-      @}
-    */
 #endif
 
 #if AF_API_VERSION >= 34
@@ -1624,15 +1683,8 @@ extern "C" {
        Get the manual eval flag
     */
     AFAPI af_err af_get_manual_eval_flag(bool *flag);
-    /**
-      @}
-    */
 #endif
 
-    /**
-        \ingroup method_mat
-        @{
-    */
     /**
         \brief Get the total number of elements across all dimensions of the array
 

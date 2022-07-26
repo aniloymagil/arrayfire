@@ -10,9 +10,11 @@
 #if defined(WITH_LINEAR_ALGEBRA)
 #include <common/blas_headers.hpp>
 #include <common/complex.hpp>
+#include <common/err_common.hpp>
 #include <cpu/cpu_blas.hpp>
 #include <cpu/cpu_helper.hpp>
 #include <math.hpp>
+#include <traits.hpp>
 
 using common::is_complex;
 
@@ -92,17 +94,17 @@ using scale_type =
                          const typename blas_base<T>::type *, const T>::type;
 
 template<typename T>
-scale_type<T> getOneScalar(const T* const vals) {
+scale_type<T> getOneScalar(const T *const vals) {
     return vals[0];
 }
 
 template<>
-scale_type<cfloat> getOneScalar(const cfloat* const vals) {
+scale_type<cfloat> getOneScalar(const cfloat *const vals) {
     return reinterpret_cast<scale_type<cfloat>>(vals);
 }
 
 template<>
-scale_type<cdouble> getOneScalar(const cdouble* const vals) {
+scale_type<cdouble> getOneScalar(const cdouble *const vals) {
     return reinterpret_cast<scale_type<cdouble>>(vals);
 }
 
@@ -125,9 +127,9 @@ using gemv_func_def = void (*)(const CBLAS_ORDER, const CBLAS_TRANSPOSE,
     template<typename T>    \
     FUNC##_func_def<T> FUNC##_func();
 
-#define BLAS_FUNC(FUNC, TYPE, PREFIX)           \
-    template<>                                  \
-    FUNC##_func_def<TYPE> FUNC##_func<TYPE>() { \
+#define BLAS_FUNC(FUNC, TYPE, PREFIX)                        \
+    template<>                                               \
+    FUNC##_func_def<TYPE> FUNC##_func<TYPE>() {              \
         return (FUNC##_func_def<TYPE>)&cblas_##PREFIX##FUNC; \
     }
 
@@ -168,9 +170,8 @@ toCblasTranspose(af_mat_prop opt) {
 }
 
 template<typename T>
-void gemm(Array<T> &out, af_mat_prop optLhs, af_mat_prop optRhs,
-          const T *alpha, const Array<T> &lhs, const Array<T> &rhs,
-          const T *beta) {
+void gemm(Array<T> &out, af_mat_prop optLhs, af_mat_prop optRhs, const T *alpha,
+          const Array<T> &lhs, const Array<T> &rhs, const T *beta) {
     using BT  = typename blas_base<T>::type;
     using CBT = const typename blas_base<T>::type;
 
@@ -181,12 +182,12 @@ void gemm(Array<T> &out, af_mat_prop optLhs, af_mat_prop optRhs,
     const int aColDim = (lOpts == CblasNoTrans) ? 1 : 0;
     const int bColDim = (rOpts == CblasNoTrans) ? 1 : 0;
 
-    const dim4 lDims = lhs.dims();
-    const dim4 rDims = rhs.dims();
-    const int M      = lDims[aRowDim];
-    const int N      = rDims[bColDim];
-    const int K      = lDims[aColDim];
-    const dim4 oDims = out.dims();
+    const dim4 &lDims = lhs.dims();
+    const dim4 &rDims = rhs.dims();
+    const int M       = lDims[aRowDim];
+    const int N       = rDims[bColDim];
+    const int K       = lDims[aColDim];
+    const dim4 &oDims = out.dims();
 
     dim4 lStrides = lhs.strides();
     dim4 rStrides = rhs.strides();
@@ -199,44 +200,43 @@ void gemm(Array<T> &out, af_mat_prop optLhs, af_mat_prop optRhs,
     bool is_r_d2_batched = (oDims[2] == rDims[2]);
     bool is_r_d3_batched = (oDims[3] == rDims[3]);
 
+    // get host pointers from mapped memory
+    mapped_ptr<T> lPtr = lhs.getMappedPtr(CL_MAP_READ);
+    mapped_ptr<T> rPtr = rhs.getMappedPtr(CL_MAP_READ);
+    mapped_ptr<T> oPtr = out.getMappedPtr(CL_MAP_READ | CL_MAP_WRITE);
+
     for (int n = 0; n < batchSize; ++n) {
-        int w = n / rDims[2];
-        int z = n - w * rDims[2];
+        int w = n / oDims[2];
+        int z = n - w * oDims[2];
 
         int loff = z * (is_l_d2_batched * lStrides[2]) +
                    w * (is_l_d3_batched * lStrides[3]);
         int roff = z * (is_r_d2_batched * rStrides[2]) +
                    w * (is_r_d3_batched * rStrides[3]);
 
-        // get host pointers from mapped memory
-        auto lPtr = lhs.getMappedPtr();
-        auto rPtr = rhs.getMappedPtr();
-        auto oPtr = out.getMappedPtr();
-
-        CBT *lptr = (CBT *)(lPtr.get() + loff);
-        CBT *rptr = (CBT *)(rPtr.get() + roff);
-        BT *optr  = (BT *)(oPtr.get() + z * oStrides[2] + w * oStrides[3]);
+        CBT *lptr = reinterpret_cast<CBT *>(lPtr.get() + loff);
+        CBT *rptr = reinterpret_cast<CBT *>(rPtr.get() + roff);
+        BT *optr  = reinterpret_cast<BT *>(oPtr.get() + z * oStrides[2] +
+                                          w * oStrides[3]);
 
         if (rDims[bColDim] == 1) {
             dim_t incr = (rOpts == CblasNoTrans) ? rStrides[0] : rStrides[1];
             gemv_func<T>()(CblasColMajor, lOpts, lDims[0], lDims[1],
-                           getOneScalar<T>(alpha),
-                           lptr, lStrides[1], rptr, incr,
-                           getOneScalar<T>(beta), optr, 1);
+                           getOneScalar<T>(alpha), lptr, lStrides[1], rptr,
+                           incr, getOneScalar<T>(beta), optr, 1);
         } else {
             gemm_func<T>()(CblasColMajor, lOpts, rOpts, M, N, K,
-                           getOneScalar<T>(alpha), lptr,
-                           lStrides[1], rptr, rStrides[1],
-                           getOneScalar<T>(beta),
-                           optr, oStrides[1]);
+                           getOneScalar<T>(alpha), lptr, lStrides[1], rptr,
+                           rStrides[1], getOneScalar<T>(beta), optr,
+                           oStrides[1]);
         }
     }
 }
 
-#define INSTANTIATE_GEMM(TYPE)                                                         \
-    template void gemm<TYPE>(Array<TYPE> &out, af_mat_prop optLhs, af_mat_prop optRhs, \
-                             const TYPE *alpha,                       \
-                             const Array<TYPE> &lhs, const Array<TYPE> &rhs,           \
+#define INSTANTIATE_GEMM(TYPE)                                               \
+    template void gemm<TYPE>(Array<TYPE> & out, af_mat_prop optLhs,          \
+                             af_mat_prop optRhs, const TYPE *alpha,          \
+                             const Array<TYPE> &lhs, const Array<TYPE> &rhs, \
                              const TYPE *beta);
 
 INSTANTIATE_GEMM(float)

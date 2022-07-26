@@ -14,62 +14,40 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
+#include <vector>
 
 namespace cpu {
 
 /// A Param iterator that iterates through a Param object
 template<typename T>
 class ParamIterator {
-    T* ptr;
-
-    // NOTE: This is not really the true coordinate of the iteration. It's
-    // values will go down as you move through the array.
-    std::array<dim_t, AF_MAX_DIMS> dim_index;
-
-    // The dimension of the array
-    const af::dim4 dims;
-
-    // The iterator's stride
-    const af::dim4 stride;
-
-    /// Calculates the iterator offsets. These are different from the original
-    /// offsets because they define the stride from the end of the last element
-    /// in the previous dimension to the first element on the next dimension.
-    static dim4 calculate_iterator_stride(const dim4& dims,
-                                          const dim4& stride) noexcept {
-        dim4 out(stride[0], stride[1] - (stride[0] * dims[0]),
-                 stride[2] - (stride[1] * dims[1]),
-                 stride[3] - (stride[2] * dims[2]));
-
-        return out;
-    }
-
    public:
     using difference_type   = ptrdiff_t;
     using value_type        = T;
     using pointer           = T*;
     using reference         = T&;
+    using const_reference   = const T&;
     using iterator_category = std::forward_iterator_tag;
 
     /// Creates a sentinel iterator. This is equivalent to the end iterator
     ParamIterator() noexcept
         : ptr(nullptr)
-        , dim_index{dims[0], dims[1], dims[2], dims[3]}
         , dims(1)
-        , stride(1) {}
+        , stride(1)
+        , dim_index{dims[0], dims[1], dims[2], dims[3]} {}
 
     /// ParamIterator Constructor
     ParamIterator(cpu::Param<T>& in) noexcept
         : ptr(in.get())
-        , dim_index{in.dims()[0], in.dims()[1], in.dims()[2], in.dims()[3]}
         , dims(in.dims())
-        , stride(calculate_iterator_stride(dims, in.strides())) {}
+        , stride(calcIteratorStrides(dims, in.strides()))
+        , dim_index{in.dims()[0], in.dims()[1], in.dims()[2], in.dims()[3]} {}
 
     ParamIterator(cpu::CParam<typename std::remove_const<T>::type>& in) noexcept
-        : ptr(in.get())
-        , dim_index{in.dims()[0], in.dims()[1], in.dims()[2], in.dims()[3]}
+        : ptr(const_cast<pointer>(in.get()))
         , dims(in.dims())
-        , stride(calculate_iterator_stride(dims, in.strides())) {}
+        , stride(calcIteratorStrides(dims, in.strides()))
+        , dim_index{in.dims()[0], in.dims()[1], in.dims()[2], in.dims()[3]} {}
 
     /// The equality operator
     bool operator==(const ParamIterator& other) const noexcept {
@@ -81,7 +59,7 @@ class ParamIterator {
         return ptr != other.ptr;
     }
 
-    /// Advances the iterator
+    /// Advances the iterator, pre increment operator
     ParamIterator& operator++() noexcept {
         for (int i = 0; i < AF_MAX_DIMS; i++) {
             dim_index[i]--;
@@ -93,20 +71,15 @@ class ParamIterator {
         return *this;
     }
 
-    /// @copydoc operator++()
-    ParamIterator& operator++(int) noexcept {
-        ParamIterator before(*this);
-        operator++();
-        return before;
-    }
-
     /// Advances the iterator by count elements
     ParamIterator& operator+=(std::size_t count) noexcept {
         while (count-- > 0) { operator++(); }
         return *this;
     }
 
-    const reference operator*() const noexcept { return *ptr; }
+    reference operator*() noexcept { return *ptr; }
+
+    const_reference operator*() const noexcept { return *ptr; }
 
     const pointer operator->() const noexcept { return ptr; }
 
@@ -116,6 +89,31 @@ class ParamIterator {
     ParamIterator<T>& operator=(const ParamIterator<T>& other) noexcept =
         default;
     ParamIterator<T>& operator=(ParamIterator<T>&& other) noexcept = default;
+
+   private:
+    T* ptr;
+
+    // The dimension of the array
+    const af::dim4 dims;
+
+    // The iterator's stride
+    const af::dim4 stride;
+
+    // NOTE: This is not really the true coordinate of the iteration. It's
+    // values will go down as you move through the array.
+    std::array<dim_t, AF_MAX_DIMS> dim_index;
+
+    /// Calculates the iterator offsets.
+    ///
+    /// These are different from the original offsets because they define
+    /// the stride from the end of the last element in the previous dimension
+    /// to the first element on the next dimension.
+    static dim4 calcIteratorStrides(const dim4& dims,
+                                    const dim4& stride) noexcept {
+        return dim4(stride[0], stride[1] - (stride[0] * dims[0]),
+                    stride[2] - (stride[1] * dims[1]),
+                    stride[3] - (stride[2] * dims[2]));
+    }
 };
 
 template<typename T>

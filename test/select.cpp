@@ -7,18 +7,17 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 #include <arrayfire.h>
 #include <gtest/gtest.h>
 #include <half.hpp>
 #include <testHelpers.hpp>
-
 #include <af/dim4.hpp>
 #include <af/traits.hpp>
 
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using af::array;
@@ -84,11 +83,16 @@ void selectTest(const dim4& dims) {
 template<typename T, bool is_right>
 void selectScalarTest(const dim4& dims) {
     SUPPORTED_TYPE_CHECK(T);
+    using scalar_t =
+        typename std::conditional<std::is_same<T, intl>::value ||
+                                      std::is_same<T, uintl>::value,
+                                  T, double>::type;
+
     dtype ty = (dtype)dtype_traits<T>::af_type;
 
     array a    = randu(dims, ty);
     array cond = randu(dims, ty) > a;
-    double b   = 3;
+    scalar_t b = static_cast<scalar_t>(3);
 
     if (a.isinteger()) { a = (a % (1 << 30)).as(ty); }
 

@@ -8,7 +8,7 @@
  ********************************************************/
 
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
 #include <handle.hpp>
 #include <math.hpp>
@@ -20,8 +20,13 @@
 #include <af/index.h>
 #include <af/statistics.h>
 
-using namespace detail;
 using af::dim4;
+using detail::Array;
+using detail::division;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
+using std::sort;
 
 template<typename T>
 static double median(const af_array& in) {
@@ -31,24 +36,23 @@ static double median(const af_array& in) {
 
     af_array temp = 0;
     AF_CHECK(af_moddims(&temp, in, 1, dims.get()));
-    const Array<T> input = getArray<T>(temp);
+    const Array<T>& input = getArray<T>(temp);
 
     // Shortcut cases for 1 or 2 elements
     if (nElems == 1) {
         T result;
         AF_CHECK(af_get_data_ptr((void*)&result, in));
         return result;
-    } else if (nElems == 2) {
+    }
+    if (nElems == 2) {
         T result[2];
         AF_CHECK(af_get_data_ptr((void*)&result, in));
-        if (input.isFloating()) {
-            return division(result[0] + result[1], 2.0);
-        } else {
-            return division((float)result[0] + (float)result[1], 2.0);
-        }
+        return division(
+            (static_cast<double>(result[0]) + static_cast<double>(result[1])),
+            2.0);
     }
 
-    double mid       = (nElems + 1) / 2;
+    double mid       = static_cast<double>(nElems + 1) / 2.0;
     af_seq mdSpan[1] = {af_make_seq(mid - 1, mid, 1)};
 
     Array<T> sortedArr = sort<T>(input, 0, true);
@@ -68,11 +72,9 @@ static double median(const af_array& in) {
     if (nElems % 2 == 1) {
         result = resPtr[0];
     } else {
-        if (input.isFloating()) {
-            result = division(resPtr[0] + resPtr[1], 2);
-        } else {
-            result = division((float)resPtr[0] + (float)resPtr[1], 2);
-        }
+        result = division(
+            static_cast<double>(resPtr[0]) + static_cast<double>(resPtr[1]),
+            2.0);
     }
 
     return result;
@@ -90,9 +92,9 @@ static af_array median(const af_array& in, const dim_t dim) {
 
     Array<T> sortedIn = sort<T>(input, dim, true);
 
-    int dimLength = input.dims()[dim];
-    double mid    = (dimLength + 1) / 2;
-    af_array left = 0;
+    size_t dimLength = input.dims()[dim];
+    double mid       = static_cast<double>(dimLength + 1) / 2.0;
+    af_array left    = 0;
 
     af_seq slices[4] = {af_span, af_span, af_span, af_span};
     slices[dim]      = af_make_seq(mid - 1.0, mid - 1.0, 1.0);
@@ -100,6 +102,7 @@ static af_array median(const af_array& in, const dim_t dim) {
     af_array sortedIn_handle = getHandle<T>(sortedIn);
     AF_CHECK(af_index(&left, sortedIn_handle, input.ndims(), slices));
 
+    af_array out = nullptr;
     if (dimLength % 2 == 1) {
         // mid-1 is our guy
         if (input.isFloating()) {
@@ -123,7 +126,6 @@ static af_array median(const af_array& in, const dim_t dim) {
 
         af_array sumarr = 0;
         af_array carr   = 0;
-        af_array result = 0;
 
         dim4 cdims = dims;
         cdims[dim] = 1;
@@ -141,18 +143,19 @@ static af_array median(const af_array& in, const dim_t dim) {
         }
 
         AF_CHECK(af_add(&sumarr, left, right, false));
-        AF_CHECK(af_mul(&result, sumarr, carr, false));
+        AF_CHECK(af_mul(&out, sumarr, carr, false));
 
         AF_CHECK(af_release_array(left));
         AF_CHECK(af_release_array(right));
         AF_CHECK(af_release_array(sumarr));
         AF_CHECK(af_release_array(carr));
         AF_CHECK(af_release_array(sortedIn_handle));
-        return result;
     }
+    return out;
 }
 
-af_err af_median_all(double* realVal, double* imagVal, const af_array in) {
+af_err af_median_all(double* realVal, double* imagVal,  // NOLINT
+                     const af_array in) {
     UNUSED(imagVal);
     try {
         const ArrayInfo& info = getInfo(in);

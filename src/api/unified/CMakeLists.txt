@@ -1,24 +1,30 @@
-
+generate_product_version(af_unified_ver_res_file
+  FILE_NAME "af"
+  FILE_DESCRIPTION "Unified Backend Dynamic-link library"
+)
 
 add_library(af "")
 add_library(ArrayFire::af ALIAS af)
 
 target_sources(af
   PRIVATE
+    ${af_unified_ver_res_file}
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/arith.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/array.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blas.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/error.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/event.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/features.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/internal.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/jit_test_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lapack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/memory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ml.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/moments.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/random.cpp
@@ -31,6 +37,28 @@ target_sources(af
     ${CMAKE_CURRENT_SOURCE_DIR}/vision.cpp
   )
 
+if(OpenCL_FOUND)
+  target_sources(af
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/opencl.cpp
+  )
+
+  target_include_directories(af
+    PRIVATE
+      $<TARGET_PROPERTY:OpenCL::OpenCL,INTERFACE_INCLUDE_DIRECTORIES>)
+
+endif()
+
+if(CUDA_FOUND)
+  target_sources(af
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/cuda.cpp)
+
+  target_include_directories(af
+    PRIVATE
+      ${CUDA_INCLUDE_DIRS})
+endif()
+
 target_sources(af
   PRIVATE
     ${ArrayFire_SOURCE_DIR}/src/api/c/type_util.cpp
@@ -42,6 +70,7 @@ target_sources(af
     ${ArrayFire_SOURCE_DIR}/src/backend/common/err_common.cpp
     ${ArrayFire_SOURCE_DIR}/src/backend/common/util.cpp
     ${ArrayFire_SOURCE_DIR}/src/backend/common/util.hpp
+    ${ArrayFire_SOURCE_DIR}/src/backend/common/deprecated.hpp
   )
 
 arrayfire_set_default_cxx_flags(af)
@@ -55,6 +84,8 @@ else()
       ${ArrayFire_SOURCE_DIR}/src/backend/common/module_loading_unix.cpp)
 endif()
 
+target_compile_definitions(af PRIVATE AF_UNIFIED)
+
 target_include_directories(af
   PUBLIC
     $<BUILD_INTERFACE:${ArrayFire_SOURCE_DIR}/include>
@@ -62,33 +93,19 @@ target_include_directories(af
     $<INSTALL_INTERFACE:${AF_INSTALL_INC_DIR}>
   PRIVATE
     ${ArrayFire_SOURCE_DIR}/src/api/c
+    ${ArrayFire_SOURCE_DIR}/src/api/unified
     $<TARGET_PROPERTY:afcommon_interface,INTERFACE_INCLUDE_DIRECTORIES>
     ${CMAKE_BINARY_DIR}
   )
 
 target_link_libraries(af
   PRIVATE
+    af_spdlog
     cpp_api_interface
-    spdlog
     Threads::Threads
+    Boost::boost
     ${CMAKE_DL_LIBS}
   )
-
-
-# NOTE: When loading libraries we only use the RTLD_LAZY flag for the unified
-# backend. This will only load the symbols but will not make those symbols
-# available to libraries loaded in the future. Because we link against MKL
-# and since MKL also dynamically loads libraries at runtime, the linker
-# is not able to load those symbols that are needed by those files. You could
-# pass the RTLD_GLOBAL flag to dlload, but that causes issues with the ArrayFire
-# libraries. To get around this we are also linking the unified backend with
-# the MKL library
-if((USE_CPU_MKL OR USE_OPENCL_MKL) AND TARGET MKL::MKL)
-  target_link_libraries(af
-    PRIVATE
-      MKL::MKL)
-endif()
-
 
 install(TARGETS af
   EXPORT ArrayFireUnifiedTargets
@@ -100,6 +117,8 @@ install(TARGETS af
   FRAMEWORK DESTINATION framework
   INCLUDES DESTINATION ${AF_INSTALL_INC_DIR}
   )
+
+af_split_debug_info(af ${AF_INSTALL_LIB_DIR})
 
 # install(TARGETS af EXPORT AF DESTINATION "${AF_INSTALL_LIB_DIR}"
 #   COMPONENT libraries)

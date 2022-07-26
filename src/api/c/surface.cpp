@@ -14,15 +14,26 @@
 #include <common/ArrayInfo.hpp>
 #include <common/err_common.hpp>
 #include <common/graphics_common.hpp>
+#include <common/moddims.hpp>
+#include <common/tile.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <join.hpp>
 #include <reduce.hpp>
 #include <reorder.hpp>
 #include <surface.hpp>
-#include <tile.hpp>
 
 using af::dim4;
-using namespace detail;
+using common::modDims;
+using detail::Array;
+using detail::copy_surface;
+using detail::createEmptyArray;
+using detail::forgeManager;
+using detail::getScalar;
+using detail::reduce_all;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
 using namespace graphics;
 
 template<typename T>
@@ -38,22 +49,22 @@ fg_chart setup_surface(fg_window window, const af_array xVals,
     const ArrayInfo& Yinfo = getInfo(yVals);
     const ArrayInfo& Zinfo = getInfo(zVals);
 
-    af::dim4 X_dims = Xinfo.dims();
-    af::dim4 Y_dims = Yinfo.dims();
-    af::dim4 Z_dims = Zinfo.dims();
+    dim4 X_dims = Xinfo.dims();
+    dim4 Y_dims = Yinfo.dims();
+    dim4 Z_dims = Zinfo.dims();
 
     if (Xinfo.isVector()) {
         // Convert xIn is a column vector
         xIn = modDims(xIn, xIn.elements());
         // Now tile along second dimension
         dim4 x_tdims(1, Y_dims[0], 1, 1);
-        xIn = tile(xIn, x_tdims);
+        xIn = common::tile(xIn, x_tdims);
 
         // Convert yIn to a row vector
-        yIn = modDims(yIn, af::dim4(1, yIn.elements()));
+        yIn = modDims(yIn, dim4(1, yIn.elements()));
         // Now tile along first dimension
         dim4 y_tdims(X_dims[0], 1, 1, 1);
-        yIn = tile(yIn, y_tdims);
+        yIn = common::tile(yIn, y_tdims);
     }
 
     // Flatten xIn, yIn and zIn into row vectors
@@ -64,16 +75,21 @@ fg_chart setup_surface(fg_window window, const af_array xVals,
 
     // Now join along first dimension, skip reorder
     std::vector<Array<T>> inputs{xIn, yIn, zIn};
-    Array<T> Z = join(0, inputs);
+
+    dim4 odims(3, rowDims[1]);
+    Array<T> out = createEmptyArray<T>(odims);
+    join(out, 0, inputs);
+    Array<T> Z = out;
 
     ForgeManager& fgMngr = forgeManager();
 
     // Get the chart for the current grid position (if any)
     fg_chart chart = NULL;
-    if (props->col > -1 && props->row > -1)
+    if (props->col > -1 && props->row > -1) {
         chart = fgMngr.getChart(window, props->row, props->col, FG_CHART_3D);
-    else
+    } else {
         chart = fgMngr.getChart(window, 0, 0, FG_CHART_3D);
+    }
 
     fg_surface surface =
         fgMngr.getSurface(chart, Z_dims[0], Z_dims[1], getGLType<T>());
@@ -87,12 +103,12 @@ fg_chart setup_surface(fg_window window, const af_array xVals,
         T dmin[3], dmax[3];
         FG_CHECK(_.fg_get_chart_axes_limits(
             &cmin[0], &cmax[0], &cmin[1], &cmax[1], &cmin[2], &cmax[2], chart));
-        dmin[0] = reduce_all<af_min_t, T, T>(xIn);
-        dmax[0] = reduce_all<af_max_t, T, T>(xIn);
-        dmin[1] = reduce_all<af_min_t, T, T>(yIn);
-        dmax[1] = reduce_all<af_max_t, T, T>(yIn);
-        dmin[2] = reduce_all<af_min_t, T, T>(zIn);
-        dmax[2] = reduce_all<af_max_t, T, T>(zIn);
+        dmin[0] = getScalar<T>(reduce_all<af_min_t, T, T>(xIn));
+        dmax[0] = getScalar<T>(reduce_all<af_max_t, T, T>(xIn));
+        dmin[1] = getScalar<T>(reduce_all<af_min_t, T, T>(yIn));
+        dmax[1] = getScalar<T>(reduce_all<af_max_t, T, T>(yIn));
+        dmin[2] = getScalar<T>(reduce_all<af_min_t, T, T>(zIn));
+        dmax[2] = getScalar<T>(reduce_all<af_max_t, T, T>(zIn));
 
         if (cmin[0] == 0 && cmax[0] == 0 && cmin[1] == 0 && cmax[1] == 0 &&
             cmin[2] == 0 && cmax[2] == 0) {
@@ -104,12 +120,12 @@ fg_chart setup_surface(fg_window window, const af_array xVals,
             cmin[2] = step_round(dmin[2], false);
             cmax[2] = step_round(dmax[2], true);
         } else {
-            if (cmin[0] > dmin[0]) cmin[0] = step_round(dmin[0], false);
-            if (cmax[0] < dmax[0]) cmax[0] = step_round(dmax[0], true);
-            if (cmin[1] > dmin[1]) cmin[1] = step_round(dmin[1], false);
-            if (cmax[1] < dmax[1]) cmax[1] = step_round(dmax[1], true);
-            if (cmin[2] > dmin[2]) cmin[2] = step_round(dmin[2], false);
-            if (cmax[2] < dmax[2]) cmax[2] = step_round(dmax[2], true);
+            if (cmin[0] > dmin[0]) { cmin[0] = step_round(dmin[0], false); }
+            if (cmax[0] < dmax[0]) { cmax[0] = step_round(dmax[0], true); }
+            if (cmin[1] > dmin[1]) { cmin[1] = step_round(dmin[1], false); }
+            if (cmax[1] < dmax[1]) { cmax[1] = step_round(dmax[1], true); }
+            if (cmin[2] > dmin[2]) { cmin[2] = step_round(dmin[2], false); }
+            if (cmax[2] < dmax[2]) { cmax[2] = step_round(dmax[2], true); }
         }
 
         FG_CHECK(_.fg_set_chart_axes_limits(chart, cmin[0], cmax[0], cmin[1],
@@ -127,15 +143,15 @@ af_err af_draw_surface(const af_window window, const af_array xVals,
         if (window == 0) { AF_ERROR("Not a valid window", AF_ERR_INTERNAL); }
 
         const ArrayInfo& Xinfo = getInfo(xVals);
-        af::dim4 X_dims        = Xinfo.dims();
+        dim4 X_dims            = Xinfo.dims();
         af_dtype Xtype         = Xinfo.getType();
 
         const ArrayInfo& Yinfo = getInfo(yVals);
-        af::dim4 Y_dims        = Yinfo.dims();
+        dim4 Y_dims            = Yinfo.dims();
         af_dtype Ytype         = Yinfo.getType();
 
         const ArrayInfo& Sinfo = getInfo(S);
-        af::dim4 S_dims        = Sinfo.dims();
+        const dim4& S_dims     = Sinfo.dims();
         af_dtype Stype         = Sinfo.getType();
 
         TYPE_ASSERT(Xtype == Ytype);

@@ -17,14 +17,18 @@
 #include <af/lapack.h>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::cdouble;
+using detail::cfloat;
+using detail::createEmptyArray;
+using std::swap;
 
 template<typename T>
 static inline void qr(af_array *q, af_array *r, af_array *tau,
                       const af_array in) {
-    Array<T> qArray = createEmptyArray<T>(af::dim4());
-    Array<T> rArray = createEmptyArray<T>(af::dim4());
-    Array<T> tArray = createEmptyArray<T>(af::dim4());
+    Array<T> qArray = createEmptyArray<T>(dim4());
+    Array<T> rArray = createEmptyArray<T>(dim4());
+    Array<T> tArray = createEmptyArray<T>(dim4());
 
     qr<T>(qArray, rArray, tArray, getArray<T>(in));
 
@@ -55,6 +59,9 @@ af_err af_qr(af_array *q, af_array *r, af_array *tau, const af_array in) {
             return AF_SUCCESS;
         }
 
+        ARG_ASSERT(0, q != nullptr);
+        ARG_ASSERT(1, r != nullptr);
+        ARG_ASSERT(2, tau != nullptr);
         ARG_ASSERT(3, i_info.isFloating());  // Only floating and complex types
 
         switch (type) {
@@ -81,13 +88,13 @@ af_err af_qr_inplace(af_array *tau, af_array in) {
         af_dtype type = i_info.getType();
 
         ARG_ASSERT(1, i_info.isFloating());  // Only floating and complex types
+        ARG_ASSERT(0, tau != nullptr);
 
         if (i_info.ndims() == 0) {
             return af_create_handle(tau, 0, nullptr, type);
         }
 
         af_array out;
-
         switch (type) {
             case f32: out = qr_inplace<float>(in); break;
             case f64: out = qr_inplace<double>(in); break;
@@ -95,7 +102,7 @@ af_err af_qr_inplace(af_array *tau, af_array in) {
             case c64: out = qr_inplace<cdouble>(in); break;
             default: TYPE_ERROR(1, type);
         }
-        if (tau != NULL) std::swap(*tau, out);
+        swap(*tau, out);
     }
     CATCHALL;
 

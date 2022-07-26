@@ -7,21 +7,18 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
 #include <af/arith.h>
 #include <af/array.h>
 #include <af/data.h>
 #include <af/defines.h>
+#include <af/random.h>
 #include <af/traits.hpp>
 
 #include <sstream>
 #include <string>
 #include <vector>
-
-
-#include <iostream>
 
 using af::array;
 using af::dim4;
@@ -69,10 +66,13 @@ class Clamp : public ::testing::TestWithParam<clamp_params> {
         lo_.as((dtype)af::dtype_traits<T>::af_type).host(&hlo[0]);
         hi_.as((dtype)af::dtype_traits<T>::af_type).host(&hhi[0]);
 
-        for (int i = 0; i < num; i++) {
-            if (hin[i] < hlo[i])      hgold[i] = hlo[i];
-            else if (hin[i] > hhi[i]) hgold[i] = hhi[i];
-            else                      hgold[i] = hin[i];
+        for (size_t i = 0; i < num; i++) {
+            if (hin[i] < hlo[i])
+                hgold[i] = hlo[i];
+            else if (hin[i] > hhi[i])
+                hgold[i] = hhi[i];
+            else
+                hgold[i] = hin[i];
         }
 
         gold_ = array(params.size_, &hgold[0]);

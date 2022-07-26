@@ -13,8 +13,12 @@
 namespace cpu {
 namespace kernel {
 
-template<typename OutT, typename InT, af_match_type MatchT>
+template<typename OutT, typename InT, af::matchType MatchType>
 void matchTemplate(Param<OutT> out, CParam<InT> sImg, CParam<InT> tImg) {
+    constexpr bool needMean = MatchType == AF_ZSAD || MatchType == AF_LSAD ||
+                              MatchType == AF_ZSSD || MatchType == AF_LSSD ||
+                              MatchType == AF_ZNCC;
+
     const af::dim4 sDims    = sImg.dims();
     const af::dim4 tDims    = tImg.dims();
     const af::dim4 sStrides = sImg.strides();
@@ -29,9 +33,7 @@ void matchTemplate(Param<OutT> out, CParam<InT> sImg, CParam<InT> tImg) {
 
     OutT tImgMean        = OutT(0);
     dim_t winNumElements = tImg.dims().elements();
-    bool needMean        = MatchT == AF_ZSAD || MatchT == AF_LSAD ||
-                    MatchT == AF_ZSSD || MatchT == AF_LSSD || MatchT == AF_ZNCC;
-    const InT* tpl = tImg.get();
+    const InT* tpl       = tImg.get();
 
     if (needMean) {
         for (dim_t tj = 0; tj < tDim1; tj++) {
@@ -57,7 +59,7 @@ void matchTemplate(Param<OutT> out, CParam<InT> sImg, CParam<InT> tImg) {
                     OutT disparity = OutT(0);
 
                     // mean for window
-                    // this variable will be used based on MatchT value
+                    // this variable will be used based on MatchType value
                     OutT wImgMean = OutT(0);
                     if (needMean) {
                         for (dim_t tj = 0, j = sj; tj < tDim1; tj++, j++) {
@@ -84,7 +86,7 @@ void matchTemplate(Param<OutT> out, CParam<InT> sImg, CParam<InT> tImg) {
                                             : InT(0));
                             InT tVal = tpl[tjStride + ti * tStrides[0]];
                             OutT temp;
-                            switch (MatchT) {
+                            switch (MatchType) {
                                 case AF_SAD:
                                     disparity += fabs((OutT)sVal - (OutT)tVal);
                                     break;

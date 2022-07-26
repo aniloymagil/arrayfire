@@ -16,6 +16,7 @@
 #include <common/dispatch.hpp>
 #include <debug_cuda.hpp>
 #include <math.hpp>
+#include <types.hpp>
 
 #include <limits>
 
@@ -31,22 +32,34 @@ static __global__ void kerTopkDim0(Param<T> ovals, Param<uint> oidxs,
                                    CParam<T> ivals, CParam<uint> iidxs,
                                    const int k, const af::topkFunction order,
                                    uint numLaunchBlocksY) {
-    using ValueType = uint;
-    using BlockRadixSortT =
-        BlockRadixSort<T, TOPK_THRDS_PER_BLK, TOPK_IDX_THRD_LOAD, ValueType>;
+    using ValueType       = uint;
+    using BlockRadixSortT = BlockRadixSort<compute_t<T>, TOPK_THRDS_PER_BLK,
+                                           TOPK_IDX_THRD_LOAD, ValueType>;
 
-    __shared__ typename BlockRadixSortT::TempStorage smem;
+    struct keyValBlocks {
+        // used for rearranging each granule's data items
+        // we want each thread(granule) to own TOPK_IDX_THRD_LOAD=4 consecutive
+        // datum for both coalesced memory reads and this blocked layout we need
+        // this SMEM to rearrange
+        compute_t<T> keys[TOPK_IDX_THRD_LOAD * TOPK_THRDS_PER_BLK];
+        ValueType vals[TOPK_IDX_THRD_LOAD * TOPK_THRDS_PER_BLK];
+    };
+
+    union smemUnion {
+        // used for cub radix sort
+        typename BlockRadixSortT::TempStorage sortmem;
+        // used for rearranging
+        keyValBlocks blkt;
+    } __shared__ smem;
 
     const int bw = blockIdx.y / numLaunchBlocksY;
     const int bz = blockIdx.z;
     const int by = (blockIdx.y - bw * numLaunchBlocksY);
 
-    const uint gx       = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint gxStride = blockDim.x * gridDim.x;
     const uint elements = ivals.dims[0];
 
-    const T* kdata = ivals.ptr + by * ivals.strides[1] + bz * ivals.strides[2] +
-                     bw * ivals.strides[3];
+    const data_t<T>* kdata = ivals.ptr + by * ivals.strides[1] +
+                             bz * ivals.strides[2] + bw * ivals.strides[3];
 
     const ValueType* idata = iidxs.ptr + by * iidxs.strides[1] +
                              bz * iidxs.strides[2] + bw * iidxs.strides[3];
@@ -56,23 +69,44 @@ static __global__ void kerTopkDim0(Param<T> ovals, Param<uint> oidxs,
     uint* ires = oidxs.ptr + by * oidxs.strides[1] + bz * oidxs.strides[2] +
                  bw * oidxs.strides[3];
 
-    T keys[TOPK_IDX_THRD_LOAD];
+    compute_t<T> keys[TOPK_IDX_THRD_LOAD];
     ValueType vals[TOPK_IDX_THRD_LOAD];
 
-    for (uint li = 0, i = gx; li < TOPK_IDX_THRD_LOAD; i += gxStride, li++) {
+    const int blockOffset =
+        blockDim.x * blockIdx.x * TOPK_IDX_THRD_LOAD + threadIdx.x;
+// each block will load consecutive data items while iterating a block-width at
+// a time [B0][][]...[][B1][][]...[] ... [BN][][]...[]
+#pragma unroll
+    for (uint li = 0, i = blockOffset; li < TOPK_IDX_THRD_LOAD;
+         i += blockDim.x, li++) {
         if (i < elements) {
-            keys[li] = kdata[i];
-            vals[li] = (READ_INDEX) ? idata[i] : i;
+            smem.blkt.keys[li * TOPK_THRDS_PER_BLK + threadIdx.x] =
+                static_cast<compute_t<T>>(kdata[i]);
+            smem.blkt.vals[li * TOPK_THRDS_PER_BLK + threadIdx.x] =
+                (READ_INDEX) ? idata[i] : i;
         } else {
-            keys[li] = (order == AF_TOPK_MAX) ? minval<T>() : maxval<T>();
-            vals[li] = maxval<ValueType>();
+            smem.blkt.keys[li * TOPK_THRDS_PER_BLK + threadIdx.x] =
+                (order & AF_TOPK_MAX) ? minval<compute_t<T>>()
+                                      : maxval<compute_t<T>>();
+            smem.blkt.vals[li * TOPK_THRDS_PER_BLK + threadIdx.x] =
+                maxval<ValueType>();
         }
     }
+    __syncthreads();
 
-    if (order == AF_TOPK_MAX) {
-        BlockRadixSortT(smem).SortDescendingBlockedToStriped(keys, vals);
+#pragma unroll
+    for (uint li = 0; li < TOPK_IDX_THRD_LOAD; li++) {
+        // transposed read into registers for cub radix sort
+        keys[li] = smem.blkt.keys[li + (threadIdx.x * TOPK_IDX_THRD_LOAD)];
+        vals[li] = smem.blkt.vals[li + (threadIdx.x * TOPK_IDX_THRD_LOAD)];
+    }
+    __syncthreads();
+
+    if (order & AF_TOPK_MAX) {
+        BlockRadixSortT(smem.sortmem)
+            .SortDescendingBlockedToStriped(keys, vals);
     } else {
-        BlockRadixSortT(smem).SortBlockedToStriped(keys, vals);
+        BlockRadixSortT(smem.sortmem).SortBlockedToStriped(keys, vals);
     }
 
     if (threadIdx.x < k) {

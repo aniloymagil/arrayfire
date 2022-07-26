@@ -10,14 +10,19 @@
 #include <backend.hpp>
 #include <common/err_common.hpp>
 #include <handle.hpp>
-#include <ops.hpp>
 #include <where.hpp>
 #include <af/algorithm.h>
 #include <af/dim4.hpp>
 #include <complex>
 
-using af::dim4;
-using namespace detail;
+using detail::cdouble;
+using detail::cfloat;
+using detail::intl;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
+using std::swap;
 
 template<typename T>
 static inline af_array where(const af_array in) {
@@ -50,7 +55,7 @@ af_err af_where(af_array* idx, const af_array in) {
             case b8: res = where<char>(in); break;
             default: TYPE_ERROR(1, type);
         }
-        std::swap(*idx, res);
+        swap(*idx, res);
     }
     CATCHALL
 

@@ -797,6 +797,78 @@ AFAPI array iterativeDeconv(const array& in, const array& ker,
  */
 AFAPI array inverseDeconv(const array& in, const array& psf,
                           const float gamma, const inverseDeconvAlgo algo);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] seeds is an af::array of x & y coordinates of the seed points
+              with coordinate values along columns of this af::array i.e. they
+              are not stored in interleaved fashion.
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const array &seeds,
+                         const unsigned radius,
+                         const unsigned multiplier, const int iter,
+                         const double segmentedValue);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] seedx is an af::array of x coordinates of the seed points
+   \param[in] seedy is an af::array of y coordinates of the seed points
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const array &seedx,
+                         const array &seedy, const unsigned radius,
+                         const unsigned multiplier, const int iter,
+                         const double segmentedValue);
+
+/**
+   C++ Interface for confidence connected components
+
+   \param[in] in is the input image, expects non-integral (float/double)
+              typed af_array
+   \param[in] num_seeds is the total number of seeds
+   \param[in] seedx is an array of x coordinates of the seed points
+   \param[in] seedy is an array of y coordinates of the seed points
+   \param[in] radius is the neighborhood region to be considered around
+              each seed point
+   \param[in] multiplier controls the threshold range computed from
+              the mean and variance of seed point neighborhoods
+   \param[in] iter is number of iterations
+   \param[in] segmentedValue is the value to which output array valid
+              pixels are set to.
+   \return out is the output af_array having the connected components
+
+   \ingroup image_func_confidence_cc
+*/
+AFAPI array confidenceCC(const array &in, const size_t num_seeds,
+                         const unsigned *seedx, const unsigned *seedy,
+                         const unsigned radius, const unsigned multiplier,
+                         const int iter, const double segmentedValue);
+
 #endif
 }
 #endif
@@ -973,14 +1045,15 @@ extern "C" {
     /**
        C Interface for transforming an image
 
-       \param[out] out will contain the transformed image
-       \param[in] in is input image
-       \param[in] transform is transformation matrix
-       \param[in] odim0 is the first output dimension
-       \param[in] odim1 is the second output dimension
-       \param[in] method is the interpolation type (Nearest by default)
-       \param[in] inverse if true applies inverse transform, if false applies forward transoform
-       \return     \ref AF_SUCCESS if the color transformation is successful,
+       \param[out] out       will contain the transformed image
+       \param[in]  in        is input image
+       \param[in]  transform is transformation matrix
+       \param[in]  odim0     is the first output dimension
+       \param[in]  odim1     is the second output dimension
+       \param[in]  method    is the interpolation type (Nearest by default)
+       \param[in]  inverse   if true applies inverse transform, if false applies forward transoform
+
+       \return \ref AF_SUCCESS if the color transformation is successful,
        otherwise an appropriate error code is returned.
 
        \ingroup transform_func_transform
@@ -988,6 +1061,35 @@ extern "C" {
     AFAPI af_err af_transform(af_array *out, const af_array in, const af_array transform,
                               const dim_t odim0, const dim_t odim1,
                               const af_interp_type method, const bool inverse);
+
+#if AF_API_VERSION >= 37
+    /**
+       C Interface for the version of \ref af_transform that accepts a
+       preallocated output array
+
+       \param[out] out       will contain the transformed image
+       \param[in]  in        is input image
+       \param[in]  transform is transformation matrix
+       \param[in]  odim0     is the first output dimension
+       \param[in]  odim1     is the second output dimension
+       \param[in]  method    is the interpolation type (Nearest by default)
+       \param[in]  inverse   if true applies inverse transform, if false applies forward transoform
+
+       \return \ref AF_SUCCESS if the color transformation is successful,
+       otherwise an appropriate error code is returned.
+
+       \note \p out can either be a null or existing `af_array` object. If it is a
+             sub-array of an existing `af_array`, only the corresponding portion of
+             the `af_array` will be overwritten
+       \note Passing an `af_array` that has not been initialized to \p out will
+             cause undefined behavior.
+
+       \ingroup transform_func_transform
+    */
+    AFAPI af_err af_transform_v2(af_array *out, const af_array in, const af_array transform,
+                                 const dim_t odim0, const dim_t odim1,
+                                 const af_interp_type method, const bool inverse);
+#endif
 
 #if AF_API_VERSION >= 33
     /**
@@ -1428,6 +1530,52 @@ extern "C" {
                          const bool is_column);
 #endif
 
+#if AF_API_VERSION >= 37
+    /**
+       C Interface for the version of \ref af_wrap that accepts a
+       preallocated output array
+
+       \param[out] out is an array with the input's columns (or rows) reshaped as
+                   patches
+       \param[in]  in is the input array
+       \param[in]  ox is the output's dimension 0 size
+       \param[in]  oy is the output's dimension 1 size
+       \param[in]  wx is the window size along dimension 0
+       \param[in]  wy is the window size along dimension 1
+       \param[in]  sx is the stride along dimension 0
+       \param[in]  sy is the stride along dimension 1
+       \param[in]  px is the padding along dimension 0
+       \param[in]  py is the padding along dimension 1
+       \param[in]  is_column determines whether an output patch is formed from a
+                   column (if true) or a row (if false)
+       \return     \ref AF_SUCCESS if the color transformation is successful,
+       otherwise an appropriate error code is returned.
+
+       \note Wrap is typically used to recompose an unwrapped image. If this is the
+             case, use the same parameters that were used in \ref unwrap(). Also
+             use the original image size (before unwrap) for \p ox and \p oy.
+       \note The window/patch size, \p wx \f$\times\f$ \p wy, must equal
+             `input.dims(0)` (or `input.dims(1)` if \p is_column is false).
+       \note \p sx and \p sy must be at least 1
+       \note \p px and \p py must be between [0, wx) and [0, wy), respectively
+       \note The number of patches, `input.dims(1)` (or `input.dims(0)` if
+             \p is_column is false), must equal \f$nx \times\ ny\f$, where
+             \f$\displaystyle nx = \frac{ox + 2px - wx}{sx} + 1\f$ and
+             \f$\displaystyle ny = \frac{oy + 2py - wy}{sy} + 1\f$
+       \note Batched wrap can be performed on multiple 2D slices at once if \p in
+             is three or four-dimensional
+
+       \ingroup image_func_wrap
+    */
+    AFAPI af_err af_wrap_v2(af_array *out,
+                            const af_array in,
+                            const dim_t ox, const dim_t oy,
+                            const dim_t wx, const dim_t wy,
+                            const dim_t sx, const dim_t sy,
+                            const dim_t px, const dim_t py,
+                            const bool is_column);
+#endif
+
 #if AF_API_VERSION >= 31
     /**
        C Interface wrapper for summed area tables
@@ -1613,6 +1761,33 @@ extern "C" {
     AFAPI af_err af_inverse_deconv(af_array* out, const af_array in,
                                    const af_array psf, const float gamma,
                                    const af_inverse_deconv_algo algo);
+
+    /**
+       C Interface for confidence connected components
+
+       \param[out] out is the output af_array having the connected components
+       \param[in] in is the input image, expects non-integral (float/double)
+                  typed af_array
+       \param[in] seedx is an af_array of x coordinates of the seed points
+       \param[in] seedy is an af_array of y coordinates of the seed points
+       \param[in] radius is the neighborhood region to be considered around
+                  each seed point
+       \param[in] multiplier controls the threshold range computed from
+                  the mean and variance of seed point neighborhoods
+       \param[in] iter is number of iterations
+       \param[in] segmented_value is the value to which output array valid
+                  pixels are set to.
+       \return \ref AF_SUCCESS if the execution is successful, otherwise an
+       appropriate error code is returned.
+
+       \ingroup image_func_confidence_cc
+    */
+    AFAPI af_err af_confidence_cc(af_array *out, const af_array in,
+                                  const af_array seedx, const af_array seedy,
+                                  const unsigned radius,
+                                  const unsigned multiplier, const int iter,
+                                  const double segmented_value);
+
 #endif
 
 #ifdef __cplusplus

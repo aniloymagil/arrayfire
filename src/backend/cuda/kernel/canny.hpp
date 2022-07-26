@@ -9,11 +9,9 @@
 
 #include <Param.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
-#include <nvrtc/cache.hpp>
 #include <nvrtc_kernel_headers/canny_cuh.hpp>
-
-#include <string>
 
 namespace cuda {
 namespace kernel {
@@ -28,12 +26,10 @@ static const int THREADS_Y = 16;
 template<typename T>
 void nonMaxSuppression(Param<T> output, CParam<T> magnitude, CParam<T> dx,
                        CParam<T> dy) {
-    static const std::string source(canny_cuh, canny_cuh_len);
-
-    auto nonMaxSuppress =
-        getKernel("cuda::nonMaxSuppression", source, {TemplateTypename<T>()},
-                  {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
-                   DefineValue(THREADS_X), DefineValue(THREADS_Y)});
+    auto nonMaxSuppress = common::getKernel(
+        "cuda::nonMaxSuppression", {canny_cuh_src}, {TemplateTypename<T>()},
+        {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
+         DefineValue(THREADS_X), DefineValue(THREADS_Y)});
 
     dim3 threads(kernel::THREADS_X, kernel::THREADS_Y);
 
@@ -51,20 +47,18 @@ void nonMaxSuppression(Param<T> output, CParam<T> magnitude, CParam<T> dx,
 
 template<typename T>
 void edgeTrackingHysteresis(Param<T> output, CParam<T> strong, CParam<T> weak) {
-    static const std::string source(canny_cuh, canny_cuh_len);
-
-    auto initEdgeOut =
-        getKernel("cuda::initEdgeOut", source, {TemplateTypename<T>()},
-                  {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
-                   DefineValue(THREADS_X), DefineValue(THREADS_Y)});
-    auto edgeTrack =
-        getKernel("cuda::edgeTrack", source, {TemplateTypename<T>()},
-                  {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
-                   DefineValue(THREADS_X), DefineValue(THREADS_Y)});
-    auto suppressLeftOver =
-        getKernel("cuda::suppressLeftOver", source, {TemplateTypename<T>()},
-                  {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
-                   DefineValue(THREADS_X), DefineValue(THREADS_Y)});
+    auto initEdgeOut = common::getKernel(
+        "cuda::initEdgeOut", {canny_cuh_src}, {TemplateTypename<T>()},
+        {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
+         DefineValue(THREADS_X), DefineValue(THREADS_Y)});
+    auto edgeTrack = common::getKernel(
+        "cuda::edgeTrack", {canny_cuh_src}, {TemplateTypename<T>()},
+        {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
+         DefineValue(THREADS_X), DefineValue(THREADS_Y)});
+    auto suppressLeftOver = common::getKernel(
+        "cuda::suppressLeftOver", {canny_cuh_src}, {TemplateTypename<T>()},
+        {DefineValue(STRONG), DefineValue(WEAK), DefineValue(NOEDGE),
+         DefineValue(THREADS_X), DefineValue(THREADS_Y)});
 
     dim3 threads(kernel::THREADS_X, kernel::THREADS_Y);
 
@@ -79,13 +73,15 @@ void edgeTrackingHysteresis(Param<T> output, CParam<T> strong, CParam<T> weak) {
     initEdgeOut(qArgs, output, strong, weak, blk_x, blk_y);
     POST_LAUNCH_CHECK();
 
+    auto flagPtr = edgeTrack.getDevPtr("hasChanged");
+
     int notFinished = 1;
     while (notFinished) {
         notFinished = 0;
-        edgeTrack.setScalar("hasChanged", notFinished);
+        edgeTrack.setFlag(flagPtr, &notFinished);
         edgeTrack(qArgs, output, blk_x, blk_y);
         POST_LAUNCH_CHECK();
-        edgeTrack.getScalar(notFinished, "hasChanged");
+        notFinished = edgeTrack.getFlag(flagPtr);
     }
     suppressLeftOver(qArgs, output, blk_x, blk_y);
     POST_LAUNCH_CHECK();

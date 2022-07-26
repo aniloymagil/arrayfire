@@ -9,8 +9,10 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
+#include <common/moddims.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <lookup.hpp>
 #include <reduce.hpp>
@@ -20,7 +22,21 @@
 #include <af/image.h>
 #include <af/index.h>
 
-using namespace detail;
+using af::dim4;
+using common::cast;
+using common::modDims;
+using detail::arithOp;
+using detail::Array;
+using detail::createValueArray;
+using detail::getScalar;
+using detail::intl;
+using detail::lookup;
+using detail::reduce_all;
+using detail::scan;
+using detail::uchar;
+using detail::uint;
+using detail::uintl;
+using detail::ushort;
 
 template<typename T, typename hType>
 static af_array hist_equal(const af_array& in, const af_array& hist) {
@@ -31,14 +47,14 @@ static af_array hist_equal(const af_array& in, const af_array& hist) {
 
     Array<float> fHist = cast<float>(getArray<hType>(hist));
 
-    dim4 hDims       = fHist.dims();
-    dim_t grayLevels = fHist.elements();
+    const dim4& hDims = fHist.dims();
+    dim_t grayLevels  = fHist.elements();
 
     Array<float> cdf = scan<af_add_t, float, float>(fHist, 0);
 
-    float minCdf = reduce_all<af_min_t, float, float>(cdf);
-    float maxCdf = reduce_all<af_max_t, float, float>(cdf);
-    float factor = (float)(grayLevels - 1) / (maxCdf - minCdf);
+    float minCdf = getScalar<float>(reduce_all<af_min_t, float, float>(cdf));
+    float maxCdf = getScalar<float>(reduce_all<af_max_t, float, float>(cdf));
+    float factor = static_cast<float>(grayLevels - 1) / (maxCdf - minCdf);
 
     // constant array of min value from cdf
     Array<float> minCnst = createValueArray<float>(hDims, minCdf);

@@ -8,8 +8,9 @@
  ********************************************************/
 #pragma once
 
+#include <cl2hpp.hpp>
 #include <common/EventBase.hpp>
-#include <platform.hpp>
+#include <af/event.h>
 
 namespace opencl {
 class OpenCLEventPolicy {
@@ -18,7 +19,7 @@ class OpenCLEventPolicy {
     using QueueType = cl_command_queue;
     using ErrorType = cl_int;
 
-    static cl_int createEvent(cl_event *e) noexcept {
+    static cl_int createAndMarkEvent(cl_event *e) noexcept {
         // Events are created when you mark them
         return CL_SUCCESS;
     }
@@ -43,6 +44,16 @@ class OpenCLEventPolicy {
 using Event = common::EventBase<OpenCLEventPolicy>;
 
 /// \brief Creates a new event and marks it in the queue
-Event make_event(cl::CommandQueue &queue);
+Event makeEvent(cl::CommandQueue &queue);
+
+af_event createEvent();
+
+void markEventOnActiveQueue(af_event eventHandle);
+
+void enqueueWaitOnActiveQueue(af_event eventHandle);
+
+void block(af_event eventHandle);
+
+af_event createAndMarkEvent();
 
 }  // namespace opencl

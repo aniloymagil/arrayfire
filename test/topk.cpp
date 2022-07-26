@@ -6,7 +6,7 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
+
 #include <arrayfire.h>
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
@@ -21,6 +21,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 using af::array;
@@ -29,6 +30,7 @@ using af::dtype_traits;
 using af::iota;
 using af::topk;
 using af::topkFunction;
+using half_float::half;
 
 using std::iota;
 using std::make_pair;
@@ -45,13 +47,34 @@ using std::vector;
 template<typename T>
 class TopK : public ::testing::Test {};
 
-typedef ::testing::Types<float, double, int, uint> TestTypes;
+typedef ::testing::Types<float, double, int, uint, half_float::half> TestTypes;
 
 TYPED_TEST_CASE(TopK, TestTypes);
 
 template<typename T>
+void increment_next(T& val,
+                    typename std::enable_if<std::is_floating_point<T>::value,
+                                            int>::type t = 0) {
+    val = std::nextafterf(val, std::numeric_limits<T>::max());
+}
+
+template<typename T>
+void increment_next(
+    T& val,
+    typename std::enable_if<std::is_integral<T>::value, int>::type t = 0) {
+    ++val;
+}
+
+void increment_next(half_float::half& val) {
+    half_float::half tmp = (half_float::half)half_float::nextafter(
+        val, std::numeric_limits<half_float::half>::max());
+    val = tmp;
+}
+
+template<typename T>
 void topkTest(const int ndims, const dim_t* dims, const unsigned k,
               const int dim, const af_topk_function order) {
+    SUPPORTED_TYPE_CHECK(T);
     af_dtype dtype = (af_dtype)dtype_traits<T>::af_type;
 
     af_array input, output, outindex;
@@ -68,7 +91,11 @@ void topkTest(const int ndims, const dim_t* dims, const unsigned k,
     size_t bSize  = dims[dim];
 
     vector<T> inData(ielems);
-    iota(begin(inData), end(inData), 0);
+    T val{std::numeric_limits<T>::lowest()};
+    generate(begin(inData), end(inData), [&]() {
+        increment_next(val);
+        return val;
+    });
 
     random_device rnd_device;
     mt19937 g(rnd_device());
@@ -86,7 +113,7 @@ void topkTest(const int ndims, const dim_t* dims, const unsigned k,
         for (size_t i = b * bSize; i < ((b + 1) * bSize); ++i)
             kvPairs.push_back(make_pair(inData[i], (i - b * bSize)));
 
-        if (order == AF_TOPK_MIN) {
+        if (order & AF_TOPK_MIN) {
             stable_sort(kvPairs.begin(), kvPairs.end(),
                         [](const KeyValuePair& lhs, const KeyValuePair& rhs) {
                             return lhs.first < rhs.first;
@@ -94,7 +121,7 @@ void topkTest(const int ndims, const dim_t* dims, const unsigned k,
         } else {
             stable_sort(kvPairs.begin(), kvPairs.end(),
                         [](const KeyValuePair& lhs, const KeyValuePair& rhs) {
-                            return lhs.first >= rhs.first;
+                            return lhs.first > rhs.first;
                         });
         }
 
@@ -132,43 +159,58 @@ void topkTest(const int ndims, const dim_t* dims, const unsigned k,
     ASSERT_SUCCESS(af_release_array(outindex));
 }
 
+int type_max(af_dtype type) {
+    switch (type) {
+        case f16: return 63000;
+        default: return 100000;
+    }
+}
+
 TYPED_TEST(TopK, Max1D0) {
-    dim_t dims[4] = {100000, 1, 1, 1};
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t), 1, 1, 1};
     topkTest<TypeParam>(1, dims, 5, 0, AF_TOPK_MAX);
 }
 
 TYPED_TEST(TopK, Max2D0) {
-    dim_t dims[4] = {10000, 10, 1, 1};
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 10, 10, 1, 1};
     topkTest<TypeParam>(2, dims, 3, 0, AF_TOPK_MAX);
 }
 
 TYPED_TEST(TopK, Max3D0) {
-    dim_t dims[4] = {10000, 10, 10, 1};
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 100, 10, 10, 1};
     topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_MAX);
 }
 
 TYPED_TEST(TopK, Max4D0) {
-    dim_t dims[4] = {10000, 10, 10, 10};
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 1000, 10, 10, 10};
     topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_MAX);
 }
 
-TYPED_TEST(TopK, MIN1D0) {
-    dim_t dims[4] = {100000, 1, 1, 1};
+TYPED_TEST(TopK, Min1D0) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t), 1, 1, 1};
     topkTest<TypeParam>(1, dims, 5, 0, AF_TOPK_MIN);
 }
 
-TYPED_TEST(TopK, MIN2D0) {
-    dim_t dims[4] = {10000, 10, 1, 1};
+TYPED_TEST(TopK, Min2D0) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 10, 10, 1, 1};
     topkTest<TypeParam>(2, dims, 3, 0, AF_TOPK_MIN);
 }
 
-TYPED_TEST(TopK, MIN3D0) {
-    dim_t dims[4] = {10000, 10, 10, 1};
+TYPED_TEST(TopK, Min3D0) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 100, 10, 10, 1};
     topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_MIN);
 }
 
-TYPED_TEST(TopK, MIN4D0) {
-    dim_t dims[4] = {10000, 10, 10, 10};
+TYPED_TEST(TopK, Min4D0) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 1000, 10, 10, 10};
     topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_MIN);
 }
 
@@ -186,6 +228,74 @@ TEST(TopK, ValidationCheck_DefaultDim) {
     af_array out, idx, in;
     ASSERT_SUCCESS(af_randu(&in, 4, dims, f32));
     ASSERT_SUCCESS(af_topk(&out, &idx, in, 10, -1, AF_TOPK_MAX));
+    ASSERT_SUCCESS(af_release_array(in));
+    ASSERT_SUCCESS(af_release_array(out));
+    ASSERT_SUCCESS(af_release_array(idx));
+}
+
+// stable variants
+TYPED_TEST(TopK, Max1D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t), 1, 1, 1};
+    topkTest<TypeParam>(1, dims, 5, 0, AF_TOPK_STABLE_MAX);
+}
+
+TYPED_TEST(TopK, Max2D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 10, 10, 1, 1};
+    topkTest<TypeParam>(2, dims, 3, 0, AF_TOPK_STABLE_MAX);
+}
+
+TYPED_TEST(TopK, Max3D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 100, 10, 10, 1};
+    topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_STABLE_MAX);
+}
+
+TYPED_TEST(TopK, Max4D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 1000, 10, 10, 10};
+    topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_STABLE_MAX);
+}
+
+TYPED_TEST(TopK, Min1D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t), 1, 1, 1};
+    topkTest<TypeParam>(1, dims, 5, 0, AF_TOPK_STABLE_MIN);
+}
+
+TYPED_TEST(TopK, Min2D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 10, 10, 1, 1};
+    topkTest<TypeParam>(2, dims, 3, 0, AF_TOPK_STABLE_MIN);
+}
+
+TYPED_TEST(TopK, Min3D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 100, 10, 10, 1};
+    topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_STABLE_MIN);
+}
+
+TYPED_TEST(TopK, Min4D0_Stable) {
+    af_dtype t    = (af_dtype)dtype_traits<TypeParam>::af_type;
+    dim_t dims[4] = {type_max(t) / 1000, 10, 10, 10};
+    topkTest<TypeParam>(2, dims, 5, 0, AF_TOPK_STABLE_MIN);
+}
+
+TEST(TopK, ValidationCheck_DimN_Stable) {
+    dim_t dims[4] = {10, 10, 1, 1};
+    af_array out, idx, in;
+    ASSERT_SUCCESS(af_randu(&in, 2, dims, f32));
+    ASSERT_EQ(AF_ERR_NOT_SUPPORTED,
+              af_topk(&out, &idx, in, 10, 1, AF_TOPK_STABLE_MAX));
+    ASSERT_SUCCESS(af_release_array(in));
+}
+
+TEST(TopK, ValidationCheck_DefaultDim_Stable) {
+    dim_t dims[4] = {10, 10, 1, 1};
+    af_array out, idx, in;
+    ASSERT_SUCCESS(af_randu(&in, 4, dims, f32));
+    ASSERT_SUCCESS(af_topk(&out, &idx, in, 10, -1, AF_TOPK_STABLE_MAX));
     ASSERT_SUCCESS(af_release_array(in));
     ASSERT_SUCCESS(af_release_array(out));
     ASSERT_SUCCESS(af_release_array(idx));
@@ -291,9 +401,95 @@ TEST_P(TopKParams, CPP) {
                 float gold  = static_cast<float>(ii * d0 + j);
                 int goldidx = j;
                 ASSERT_FLOAT_EQ(gold, hval[i])
-                    << print_context(i, 0, hval, hidx);
-                ASSERT_EQ(goldidx, hidx[i]) << print_context(i, 0, hval, hidx);
+                    << print_context(i, j, hval, hidx);
+                ASSERT_EQ(goldidx, hidx[i]) << print_context(i, j, hval, hidx);
             }
         }
     }
+}
+
+TEST(TopK, KGreaterThan256) {
+    af::array a = af::randu(500);
+    af::array vals, idx;
+
+    int k = 257;
+    EXPECT_THROW(topk(vals, idx, a, k), af::exception)
+        << "The current limitation of the K value as increased. Please check "
+           "or remove this test";
+}
+
+TEST(TopK, KEquals0) {
+    af::array a = af::randu(500);
+    af::array vals, idx;
+
+    int k = 0;
+    EXPECT_THROW(topk(vals, idx, a, k), af::exception)
+        << "K cannot be less than 1";
+}
+
+TEST(TopK, KLessThan0) {
+    af::array a = af::randu(500);
+    af::array vals, idx;
+
+    int k = -1;
+    EXPECT_THROW(topk(vals, idx, a, k), af::exception)
+        << "K cannot be less than 0";
+}
+
+TEST(TopK, DeterministicTiesMin) {
+    af::array a           = af::constant(1, 500);
+    a(af::seq(0, 499, 2)) = 7;
+    af::array vals_min, idx_min;
+
+    int k = 6;
+    topk(vals_min, idx_min, a, k, 0, AF_TOPK_STABLE_MIN);
+
+    af::array expected_idx_min   = af::seq(1, 499, 2);
+    af::array k_expected_idx_min = expected_idx_min(af::seq(0, k - 1));
+    ASSERT_ARRAYS_EQ(idx_min, k_expected_idx_min.as(u32));
+}
+
+TEST(TopK, DeterministicTiesMax) {
+    af::array a           = af::constant(1, 500);
+    a(af::seq(0, 499, 2)) = 7;
+    af::array vals_max, idx_max;
+
+    int k = 6;
+    topk(vals_max, idx_max, a, k, 0, AF_TOPK_STABLE_MAX);
+
+    af::array expected_idx_max   = af::seq(0, 499, 2);
+    af::array k_expected_idx_max = expected_idx_max(af::seq(0, k - 1));
+    ASSERT_ARRAYS_EQ(idx_max, k_expected_idx_max.as(u32));
+}
+
+TEST(TopK, DeterministicTiesBatchedMin) {
+    const int nbatch = 10;
+    af::array a      = af::constant(1, 500, nbatch, nbatch, nbatch);
+    a(af::seq(0, 499, 2), af::span, af::span, af::span) = 7;
+    af::array vals_min, idx_min;
+
+    int k = 6;
+    topk(vals_min, idx_min, a, k, 0, AF_TOPK_STABLE_MIN);
+
+    af::array expected_idx_min = af::seq(1, 499, 2);
+    af::array k_expected_idx_min =
+        af::tile(expected_idx_min(af::seq(0, k - 1)),
+                 af::dim4(1, nbatch, nbatch, nbatch));
+    ASSERT_ARRAYS_EQ(idx_min, k_expected_idx_min.as(u32));
+}
+
+TEST(TopK, DeterministicTiesBatchedMax) {
+    const int nbatch = 10;
+    af::array a      = af::constant(1, 500, nbatch, nbatch, nbatch);
+    a(af::seq(0, 499, 2), af::span, af::span, af::span) = 7;
+    af::array vals_max, idx_max;
+
+    int k = 6;
+    topk(vals_max, idx_max, a, k, 0, AF_TOPK_STABLE_MAX);
+
+    af::array expected_idx_max = af::seq(0, 499, 2);
+    af::array k_expected_idx_max =
+        af::tile(expected_idx_max(af::seq(0, k - 1)),
+                 af::dim4(1, nbatch, nbatch, nbatch));
+    ASSERT_ARRAYS_EQ(idx_max, k_expected_idx_max.as(u32));
 }

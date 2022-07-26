@@ -9,9 +9,13 @@
 
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
+#include <af/algorithm.h>
 #include <af/arith.h>
 #include <af/array.h>
 #include <af/data.h>
+#include <af/device.h>
+#include <af/random.h>
+#include <af/statistics.h>
 
 using af::array;
 using af::dtype;
@@ -150,3 +154,18 @@ MEDIAN(float, uchar)
 MEDIAN(float, short)
 MEDIAN(float, ushort)
 MEDIAN(double, double)
+
+TEST(Median, OneElement) {
+    af::array in = randu(1, f32);
+
+    af::array out = median(in);
+    ASSERT_ARRAYS_EQ(in, out);
+}
+
+TEST(Median, TwoElements) {
+    af::array in = randu(2, f32);
+
+    af::array out  = median(in);
+    af::array gold = mean(in);
+    ASSERT_ARRAYS_EQ(gold, out);
+}

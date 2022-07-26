@@ -20,8 +20,10 @@ using af::array;
 using af::cdouble;
 using af::cfloat;
 using af::constant;
+using af::dim4;
 using af::freeHost;
 using af::gforSet;
+using af::iota;
 using af::randu;
 using af::seq;
 using af::span;
@@ -118,7 +120,7 @@ TEST(GFOR, Assign_Array_Span) {
     float *hA = A.host<float>();
     float val = B.scalar<float>();
 
-    for (int i = 0; i < nx; i++) { ASSERT_EQ(hA[i], val); }
+    ASSERT_ARRAYS_EQ(A, constant(val, nx));
 
     freeHost(hA);
 }
@@ -498,4 +500,67 @@ TEST(ASSIGN, ISSUE_1127) {
     out1(seq(1, rows - 1, 2), seq(1, cols - 1, 2), span) = diag;
 
     ASSERT_ARRAYS_EQ(out0, out1);
+}
+
+TEST(GFOR, ArithLoopWithNonUnitIncrSeq) {
+    const int nx    = 10;
+    const int ny    = 10;
+    const int batch = 10;
+    const int start = 0;
+    const int end   = 8;
+    const int incr  = 2;
+
+    array A = randu(nx, ny, batch);
+    array B = randu(nx, ny);
+    array C = constant(0, nx, ny, batch);
+    array G = constant(0, nx, ny, batch);
+
+    for (int i = 0; i < batch; i += incr) {
+        G(span, span, i) = A(span, span, i) * B;
+    }
+    gfor(seq ii, start, end, incr) {
+        C(span, span, ii) = A(span, span, ii) * B;
+    }
+    ASSERT_ARRAYS_EQ(C, G);
+}
+
+TEST(GFOR, MatmulLoopWithNonUnitIncrSeq) {
+    const int nx    = 10;
+    const int ny    = 10;
+    const int batch = 10;
+    const int start = 0;
+    const int end   = 8;
+    const int incr  = 2;
+
+    array A = randu(nx, ny, batch);
+    array B = randu(nx, ny);
+    array C = constant(0, nx, ny, batch);
+    array G = constant(0, nx, ny, batch);
+
+    for (int i = 0; i < batch; i += incr) {
+        G(span, span, i) = matmul(A(span, span, i), B);
+    }
+    gfor(seq ii, start, end, incr) {
+        C(span, span, ii) = matmul(A(span, span, ii), B);
+    }
+    ASSERT_ARRAYS_NEAR(C, G, 1E-03);
+}
+
+TEST(GFOR, ConstArrayIndexing) {
+    const std::size_t dim = 4;
+
+    array m        = iota(dim4(1, dim), dim4(dim));
+    const array cm = iota(dim4(1, dim), dim4(dim));
+
+    array out_cm(dim), out_m(dim);
+
+    EXPECT_NO_THROW({
+        gfor(seq i, static_cast<double>(dim)) {
+            out_cm(i) = af::sum(cm(span,i) * cm(span,i));
+}
+});
+gfor(seq i, static_cast<double>(dim)) {
+    out_m(i) = af::sum(m(span, i) * m(span, i));
+}
+ASSERT_ARRAYS_EQ(out_cm, out_m);
 }

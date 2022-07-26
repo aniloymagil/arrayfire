@@ -7,15 +7,15 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-__kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
+kernel void meanDim(global To *oData, KParam oInfo,
 #ifdef OUTPUT_WEIGHT
-                              __global Tw *owData, KParam owInfo,
+                    global Tw *owData, KParam owInfo,
 #endif
-                              const __global Ti *iData, KParam iInfo,
+                    const global Ti *iData, KParam iInfo,
 #ifdef INPUT_WEIGHT
-                              const __global Tw *iwData, KParam iwInfo,
+                    const global Tw *iwData, KParam iwInfo,
 #endif
-                              uint groups_x, uint groups_y, uint group_dim) {
+                    uint groups_x, uint groups_y, uint group_dim) {
     const uint lidx = get_local_id(0);
     const uint lidy = get_local_id(1);
     const uint lid  = lidy * THREADS_X + lidx;
@@ -31,7 +31,7 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
 
     // There is only one element per group for out
     // There are get_local_size(1) elements per group for in
-    // Hence increment ids[dim] just after offseting out and before offsetting
+    // Hence increment ids[kDim] just after offseting out and before offsetting
     // in
     oData += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] +
              ids[1] * oInfo.strides[1] + ids[0] + oInfo.offset;
@@ -40,9 +40,9 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
     owData += ids[3] * oInfo.strides[3] + ids[2] * oInfo.strides[2] +
               ids[1] * oInfo.strides[1] + ids[0] + oInfo.offset;
 #endif
-    const uint id_dim_out = ids[dim];
+    const uint id_dim_out = ids[kDim];
 
-    ids[dim] = ids[dim] * get_local_size(1) + lidy;
+    ids[kDim] = ids[kDim] * get_local_size(1) + lidy;
 
     iData += ids[3] * iInfo.strides[3] + ids[2] * iInfo.strides[2] +
              ids[1] * iInfo.strides[1] + ids[0] + iInfo.offset;
@@ -52,19 +52,19 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
               ids[1] * iInfo.strides[1] + ids[0] + iInfo.offset;
 #endif
 
-    const uint id_dim_in   = ids[dim];
-    const uint istride_dim = iInfo.strides[dim];
+    const uint id_dim_in   = ids[kDim];
+    const uint istride_dim = iInfo.strides[kDim];
 
     bool is_valid = (ids[0] < iInfo.dims[0]) && (ids[1] < iInfo.dims[1]) &&
                     (ids[2] < iInfo.dims[2]) && (ids[3] < iInfo.dims[3]);
 
-    __local To s_val[THREADS_X * DIMY];
-    __local Tw s_wt[THREADS_X * DIMY];
+    local To s_val[THREADS_X * DIMY];
+    local Tw s_wt[THREADS_X * DIMY];
 
     To out_val = init_To;
     Tw out_wt  = init_Tw;
 
-    if (is_valid && id_dim_in < iInfo.dims[dim]) {
+    if (is_valid && id_dim_in < iInfo.dims[kDim]) {
         out_val = transform(*iData);
 #ifdef INPUT_WEIGHT
         out_wt = *iwData;
@@ -76,14 +76,14 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
     const uint id_dim_in_start = id_dim_in + group_dim * get_local_size(1);
 
 #ifdef INPUT_WEIGHT
-    for (int id = id_dim_in_start; is_valid && (id < iInfo.dims[dim]);
+    for (int id = id_dim_in_start; is_valid && (id < iInfo.dims[kDim]);
          id += group_dim * get_local_size(1)) {
         iData  = iData + group_dim * get_local_size(1) * istride_dim;
         iwData = iwData + group_dim * get_local_size(1) * istride_dim;
         binOp(&out_val, &out_wt, transform(*iData), *iwData);
     }
 #else
-    for (int id = id_dim_in_start; is_valid && (id < iInfo.dims[dim]);
+    for (int id = id_dim_in_start; is_valid && (id < iInfo.dims[kDim]);
          id += group_dim * get_local_size(1)) {
         iData = iData + group_dim * get_local_size(1) * istride_dim;
         binOp(&out_val, &out_wt, transform(*iData), one_Tw);
@@ -93,8 +93,8 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
     s_val[lid] = out_val;
     s_wt[lid]  = out_wt;
 
-    __local To *s_vptr = s_val + lid;
-    __local Tw *s_wptr = s_wt + lid;
+    local To *s_vptr = s_val + lid;
+    local Tw *s_wptr = s_wt + lid;
     barrier(CLK_LOCAL_MEM_FENCE);
 
     if (DIMY == 8) {
@@ -127,7 +127,7 @@ __kernel void mean_dim_kernel(__global To *oData, KParam oInfo,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (lidy == 0 && is_valid && (id_dim_out < oInfo.dims[dim])) {
+    if (lidy == 0 && is_valid && (id_dim_out < oInfo.dims[kDim])) {
         *oData = *s_vptr;
 #ifdef OUTPUT_WEIGHT
         *owData = *s_wptr;

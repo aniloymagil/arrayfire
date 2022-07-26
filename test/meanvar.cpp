@@ -6,7 +6,6 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 
 #include <arrayfire.h>
 #include <gtest/gtest.h>
@@ -27,6 +26,7 @@ using std::move;
 using std::string;
 using std::vector;
 
+af_err init_err = af_init();
 template<typename T>
 struct elseType {
     typedef typename cond_type<is_same_type<T, uintl>::value ||
@@ -70,8 +70,8 @@ struct meanvar_test {
         if (weights) { af_retain_array(&weights_, weights); }
         mean_.reserve(mean.size());
         variance_.reserve(variance.size());
-        std::copy(begin(mean), end(mean), back_inserter(mean_));
-        std::copy(begin(variance), end(variance), back_inserter(variance_));
+        for (auto &v : mean) mean_.push_back((outType<T>)v);
+        for (auto &v : variance) variance_.push_back((outType<T>)v);
     }
     meanvar_test()                        = default;
     meanvar_test(meanvar_test<T> &&other) = default;
@@ -92,7 +92,7 @@ struct meanvar_test {
 
     ~meanvar_test() {
 #ifndef _WIN32
-        af_release_array(in_);
+        if (in_) af_release_array(in_);
         if (weights_) {
             af_release_array(weights_);
             weights_ = 0;
@@ -108,11 +108,13 @@ template<typename T>
 class MeanVarTyped : public ::testing::TestWithParam<meanvar_test<T> > {
    public:
     void meanvar_test_function(const meanvar_test<T> &test) {
+        SUPPORTED_TYPE_CHECK(T);
         af_array mean, var;
 
         // Cast to the expected type
         af_array in = 0;
-        af_cast(&in, test.in_, (af_dtype)dtype_traits<T>::af_type);
+        ASSERT_SUCCESS(
+            af_cast(&in, test.in_, (af_dtype)dtype_traits<T>::af_type));
 
         EXPECT_EQ(AF_SUCCESS, af_meanvar(&mean, &var, in, test.weights_,
                                          test.bias_, test.dim_));
@@ -124,8 +126,11 @@ class MeanVarTyped : public ::testing::TestWithParam<meanvar_test<T> > {
         af_get_dims(&outDim[0], &outDim[1], &outDim[2], &outDim[3], in);
         outDim[test.dim_] = 1;
 
-        if (is_same_type<float, outType<T> >::value ||
-            is_same_type<cfloat, outType<T> >::value) {
+        if (is_same_type<half_float::half, outType<T> >::value) {
+            ASSERT_VEC_ARRAY_NEAR(test.mean_, outDim, mean, 1.f);
+            ASSERT_VEC_ARRAY_NEAR(test.variance_, outDim, var, 0.5f);
+        } else if (is_same_type<float, outType<T> >::value ||
+                   is_same_type<cfloat, outType<T> >::value) {
             ASSERT_VEC_ARRAY_NEAR(test.mean_, outDim, mean, 0.001f);
             ASSERT_VEC_ARRAY_NEAR(test.variance_, outDim, var, 0.2f);
         } else {
@@ -136,6 +141,42 @@ class MeanVarTyped : public ::testing::TestWithParam<meanvar_test<T> > {
         ASSERT_SUCCESS(af_release_array(in));
         ASSERT_SUCCESS(af_release_array(mean));
         ASSERT_SUCCESS(af_release_array(var));
+    }
+
+    void meanvar_cpp_test_function(const meanvar_test<T> &test) {
+        SUPPORTED_TYPE_CHECK(T);
+        array mean, var;
+
+        // Cast to the expected type
+        af_array in_tmp = 0;
+        ASSERT_SUCCESS(af_retain_array(&in_tmp, test.in_));
+        array in(in_tmp);
+        in = in.as((af_dtype)dtype_traits<T>::af_type);
+
+        af_array weights_tmp = test.weights_;
+        if (weights_tmp) {
+            ASSERT_SUCCESS(af_retain_array(&weights_tmp, weights_tmp));
+        }
+        array weights(weights_tmp);
+        meanvar(mean, var, in, weights, test.bias_, test.dim_);
+
+        vector<outType<T> > h_mean(test.mean_.size()),
+            h_var(test.variance_.size());
+
+        dim4 outDim       = in.dims();
+        outDim[test.dim_] = 1;
+
+        if (is_same_type<half_float::half, outType<T> >::value) {
+            ASSERT_VEC_ARRAY_NEAR(test.mean_, outDim, mean, 1.f);
+            ASSERT_VEC_ARRAY_NEAR(test.variance_, outDim, var, 0.5f);
+        } else if (is_same_type<float, outType<T> >::value ||
+                   is_same_type<cfloat, outType<T> >::value) {
+            ASSERT_VEC_ARRAY_NEAR(test.mean_, outDim, mean, 0.001f);
+            ASSERT_VEC_ARRAY_NEAR(test.variance_, outDim, var, 0.2f);
+        } else {
+            ASSERT_VEC_ARRAY_NEAR(test.mean_, outDim, mean, 0.00001f);
+            ASSERT_VEC_ARRAY_NEAR(test.variance_, outDim, var, 0.0001f);
+        }
     }
 };
 
@@ -224,7 +265,7 @@ template<typename T>
 vector<meanvar_test<T> > large_test_values() {
     return {
         // clang-format off
-        //               |           Name |     in_index | weight_index |                  bias |  dim | mean_index | var_index |
+        //                  |       Name |      in_index | weight_index |                  bias |  dim | mean_index | var_index |
         meanvar_test_gen<T>("Sample1Ddim0",             0,            -1,     AF_VARIANCE_SAMPLE,     0,           0,          1, MEANVAR_LARGE),
         meanvar_test_gen<T>("Sample1Ddim1",             1,            -1,     AF_VARIANCE_SAMPLE,     1,           0,          1, MEANVAR_LARGE),
         meanvar_test_gen<T>("Sample1Ddim2",             2,            -1,     AF_VARIANCE_SAMPLE,     2,           0,          1, MEANVAR_LARGE),
@@ -252,6 +293,10 @@ vector<meanvar_test<T> > large_test_values() {
     TEST_P(MeanVar##NAME, Testing) {                                          \
         const meanvar_test<TYPE> &test = GetParam();                          \
         meanvar_test_function(test);                                          \
+    }                                                                         \
+    TEST_P(MeanVar##NAME, TestingCPP) {                                       \
+        const meanvar_test<TYPE> &test = GetParam();                          \
+        meanvar_cpp_test_function(test);                                      \
     }
 
 MEANVAR_TEST(Float, float)
@@ -267,6 +312,22 @@ MEANVAR_TEST(ComplexDouble, af::af_cdouble)
 
 #undef MEANVAR_TEST
 
+using MeanVarHalf = MeanVarTyped<half_float::half>;
+INSTANTIATE_TEST_CASE_P(
+    Small, MeanVarHalf,
+    ::testing::ValuesIn(small_test_values<half_float::half>()),
+    [](const ::testing::TestParamInfo<MeanVarHalf::ParamType> info) {
+        return info.param.test_description_;
+    });
+TEST_P(MeanVarHalf, Testing) {
+    const meanvar_test<half_float::half> &test = GetParam();
+    meanvar_test_function(test);
+}
+TEST_P(MeanVarHalf, TestingCPP) {
+    const meanvar_test<half_float::half> &test = GetParam();
+    meanvar_cpp_test_function(test);
+}
+
 #define MEANVAR_TEST(NAME, TYPE)                                              \
     using MeanVar##NAME = MeanVarTyped<TYPE>;                                 \
     INSTANTIATE_TEST_CASE_P(                                                  \
@@ -278,6 +339,10 @@ MEANVAR_TEST(ComplexDouble, af::af_cdouble)
     TEST_P(MeanVar##NAME, Testing) {                                          \
         const meanvar_test<TYPE> &test = GetParam();                          \
         meanvar_test_function(test);                                          \
+    }                                                                         \
+    TEST_P(MeanVar##NAME, TestingCPP) {                                       \
+        const meanvar_test<TYPE> &test = GetParam();                          \
+        meanvar_cpp_test_function(test);                                      \
     }
 
 // Only test small sizes because the range of the large arrays go out of bounds

@@ -8,31 +8,23 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
 #include <common/dispatch.hpp>
 #include <debug_opencl.hpp>
 #include <iota.hpp>
 #include <kernel/sort_helper.hpp>
-#include <program.hpp>
 #include <traits.hpp>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
+AF_DEPRECATED_WARNINGS_OFF
 #include <boost/compute/algorithm/sort.hpp>
 #include <boost/compute/algorithm/sort_by_key.hpp>
 #include <boost/compute/core.hpp>
 #include <boost/compute/functional/operator.hpp>
 #include <boost/compute/iterator/buffer_iterator.hpp>
+AF_DEPRECATED_WARNINGS_ON
 
 namespace compute = boost::compute;
-
-using cl::Buffer;
-using cl::EnqueueArgs;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::NDRange;
-using cl::Program;
 
 namespace opencl {
 namespace kernel {
@@ -136,5 +128,3 @@ void sort0(Param val, bool isAscending) {
 }
 }  // namespace kernel
 }  // namespace opencl
-
-#pragma GCC diagnostic pop

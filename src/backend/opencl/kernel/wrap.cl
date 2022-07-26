@@ -7,11 +7,10 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-__kernel void wrap_kernel(__global T *optr, KParam out, __global T *iptr,
-                          KParam in, const int wx, const int wy, const int sx,
-                          const int sy, const int px, const int py,
-                          const int nx, const int ny, int groups_x,
-                          int groups_y) {
+kernel void wrap(global T *optr, KParam out, global T *iptr, KParam in,
+                 const int wx, const int wy, const int sx, const int sy,
+                 const int px, const int py, const int nx, const int ny,
+                 int groups_x, int groups_y) {
     int idx2 = get_group_id(0) / groups_x;
     int idx3 = get_group_id(1) / groups_y;
 
@@ -21,7 +20,7 @@ __kernel void wrap_kernel(__global T *optr, KParam out, __global T *iptr,
     int oidx0 = get_local_id(0) + get_local_size(0) * groupId_x;
     int oidx1 = get_local_id(1) + get_local_size(1) * groupId_y;
 
-    optr += idx2 * out.strides[2] + idx3 * out.strides[3];
+    optr += idx2 * out.strides[2] + idx3 * out.strides[3] + out.offset;
     iptr += idx2 * in.strides[2] + idx3 * in.strides[3] + in.offset;
 
     if (oidx0 >= out.dims[0] || oidx1 >= out.dims[1]) return;

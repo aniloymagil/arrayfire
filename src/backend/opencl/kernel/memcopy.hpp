@@ -8,27 +8,19 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
-#include <cache.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <common/traits.hpp>
 #include <debug_opencl.hpp>
 #include <kernel_headers/copy.hpp>
 #include <kernel_headers/memcopy.hpp>
-#include <program.hpp>
 #include <traits.hpp>
+
 #include <algorithm>
-#include <sstream>
 #include <string>
-
-using cl::Buffer;
-using cl::EnqueueArgs;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::NDRange;
-using cl::Program;
-
-using std::string;
+#include <vector>
 
 namespace opencl {
 namespace kernel {
@@ -36,35 +28,23 @@ typedef struct {
     dim_t dim[4];
 } dims_t;
 
-static const uint DIM0 = 32;
-static const uint DIM1 = 8;
+constexpr uint DIM0 = 32;
+constexpr uint DIM1 = 8;
 
 template<typename T>
 void memcopy(cl::Buffer out, const dim_t *ostrides, const cl::Buffer in,
              const dim_t *idims, const dim_t *istrides, int offset,
              uint ndims) {
-    std::string refName =
-        std::string("memcopy_") + std::string(dtype_traits<T>::getName());
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<T>(),
+    };
+    std::vector<std::string> options = {
+        DefineKeyValue(T, dtype_traits<T>::getName()),
+    };
+    options.emplace_back(getTypeBuildDefinition<T>());
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
-
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::ostringstream options;
-
-        options << " -D T=" << dtype_traits<T>::getName();
-        if (std::is_same<T, double>::value || std::is_same<T, cdouble>::value)
-            options << " -D USE_DOUBLE";
-
-        const char *ker_strs[] = {memcopy_cl};
-        const int ker_lens[]   = {memcopy_cl_len};
-        Program prog;
-        buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "memcopy_kernel");
-
-        addKernelToCache(device, refName, entry);
-    }
+    auto memCopy =
+        common::getKernel("memCopy", {memcopy_cl_src}, targs, options);
 
     dims_t _ostrides = {{ostrides[0], ostrides[1], ostrides[2], ostrides[3]}};
     dims_t _istrides = {{istrides[0], istrides[1], istrides[2], istrides[3]}};
@@ -79,57 +59,38 @@ void memcopy(cl::Buffer out, const dim_t *ostrides, const cl::Buffer in,
     int groups_0 = divup(idims[0], local_size[0]);
     int groups_1 = divup(idims[1], local_size[1]);
 
-    NDRange local(local_size[0], local_size[1]);
-    NDRange global(groups_0 * idims[2] * local_size[0],
-                   groups_1 * idims[3] * local_size[1]);
+    cl::NDRange local(local_size[0], local_size[1]);
+    cl::NDRange global(groups_0 * idims[2] * local_size[0],
+                       groups_1 * idims[3] * local_size[1]);
 
-    auto memCpyOp =
-        KernelFunctor<Buffer, dims_t, Buffer, dims_t, dims_t, int, int, int>(
-            *entry.ker);
-
-    memCpyOp(EnqueueArgs(getQueue(), global, local), out, _ostrides, in, _idims,
-             _istrides, offset, groups_0, groups_1);
-
+    memCopy(cl::EnqueueArgs(getQueue(), global, local), out, _ostrides, in,
+            _idims, _istrides, offset, groups_0, groups_1);
     CL_DEBUG_FINISH(getQueue());
 }
 
-template<typename inType, typename outType, bool same_dims>
-void copy(Param dst, const Param src, int ndims, outType default_value,
-          double factor) {
-    std::string refName = std::string("copy_") +
-                          std::string(dtype_traits<inType>::getName()) +
-                          std::string(dtype_traits<outType>::getName()) +
-                          std::to_string(same_dims);
+template<typename inType, typename outType>
+void copy(Param dst, const Param src, const int ndims,
+          const outType default_value, const double factor,
+          const bool same_dims) {
+    using std::string;
 
-    int device       = getActiveDeviceId();
-    kc_entry_t entry = kernelCache(device, refName);
+    std::vector<TemplateArg> targs = {
+        TemplateTypename<inType>(),
+        TemplateTypename<outType>(),
+        TemplateArg(same_dims),
+    };
+    std::vector<string> options = {
+        DefineKeyValue(inType, dtype_traits<inType>::getName()),
+        DefineKeyValue(outType, dtype_traits<outType>::getName()),
+        string(" -D inType_" + string(dtype_traits<inType>::getName())),
+        string(" -D outType_" + string(dtype_traits<outType>::getName())),
+        DefineKeyValue(SAME_DIMS, static_cast<int>(same_dims)),
+    };
+    options.emplace_back(getTypeBuildDefinition<inType, outType>());
 
-    if (entry.prog == 0 && entry.ker == 0) {
-        std::ostringstream options;
+    auto copy = common::getKernel("reshapeCopy", {copy_cl_src}, targs, options);
 
-        options << " -D inType=" << dtype_traits<inType>::getName()
-                << " -D outType=" << dtype_traits<outType>::getName()
-                << " -D inType_" << dtype_traits<inType>::getName()
-                << " -D outType_" << dtype_traits<outType>::getName()
-                << " -D SAME_DIMS=" << same_dims;
-
-        if (std::is_same<inType, double>::value ||
-            std::is_same<inType, cdouble>::value ||
-            std::is_same<outType, double>::value ||
-            std::is_same<outType, cdouble>::value)
-            options << " -D USE_DOUBLE";
-
-        const char *ker_strs[] = {copy_cl};
-        const int ker_lens[]   = {copy_cl_len};
-        Program prog;
-        buildProgram(prog, 1, ker_strs, ker_lens, options.str());
-        entry.prog = new Program(prog);
-        entry.ker  = new Kernel(*entry.prog, "copy");
-
-        addKernelToCache(device, refName, entry);
-    }
-
-    NDRange local(DIM0, DIM1);
+    cl::NDRange local(DIM0, DIM1);
     size_t local_size[] = {DIM0, DIM1};
 
     local_size[0] *= local_size[1];
@@ -138,8 +99,8 @@ void copy(Param dst, const Param src, int ndims, outType default_value,
     int blk_x = divup(dst.info.dims[0], local_size[0]);
     int blk_y = divup(dst.info.dims[1], local_size[1]);
 
-    NDRange global(blk_x * dst.info.dims[2] * DIM0,
-                   blk_y * dst.info.dims[3] * DIM1);
+    cl::NDRange global(blk_x * dst.info.dims[2] * DIM0,
+                       blk_y * dst.info.dims[3] * DIM1);
 
     dims_t trgt_dims;
     if (same_dims) {
@@ -153,13 +114,9 @@ void copy(Param dst, const Param src, int ndims, outType default_value,
         trgt_dims    = {{trgt_i, trgt_j, trgt_k, trgt_l}};
     }
 
-    auto copyOp = KernelFunctor<Buffer, KParam, Buffer, KParam, outType, float,
-                                dims_t, int, int>(*entry.ker);
-
-    copyOp(EnqueueArgs(getQueue(), global, local), *dst.data, dst.info,
-           *src.data, src.info, default_value, (float)factor, trgt_dims, blk_x,
-           blk_y);
-
+    copy(cl::EnqueueArgs(getQueue(), global, local), *dst.data, dst.info,
+         *src.data, src.info, default_value, (float)factor, trgt_dims, blk_x,
+         blk_y);
     CL_DEBUG_FINISH(getQueue());
 }
 }  // namespace kernel

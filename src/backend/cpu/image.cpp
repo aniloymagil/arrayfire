@@ -17,8 +17,6 @@
 #include <platform.hpp>
 #include <queue.hpp>
 
-using af::dim4;
-
 namespace cpu {
 
 template<typename T>
@@ -26,7 +24,7 @@ void copy_image(const Array<T> &in, fg_image image) {
     ForgeModule &_ = graphics::forgePlugin();
 
     CheckGL("Before CopyArrayToImage");
-    const T *d_X       = in.get();
+    const T *d_X = in.get();
     getQueue().sync();
 
     unsigned data_size = 0, buffer = 0;

@@ -200,6 +200,8 @@ namespace af
         \param[in] second is the second input array
         \return the array that joins input arrays along the given dimension
 
+        \note empty arrays will be ignored
+
         \ingroup manip_func_join
     */
     AFAPI array join(const int dim, const array &first, const array &second);
@@ -212,6 +214,8 @@ namespace af
         \param[in] second is the second input array
         \param[in] third is the third input array
         \return the array that joins input arrays along the given dimension
+
+        \note empty arrays will be ignored
 
         \ingroup manip_func_join
     */
@@ -226,6 +230,8 @@ namespace af
         \param[in] third is the third input array
         \param[in] fourth is the fourth input array
         \return the array that joins input arrays along the given dimension
+
+        \note empty arrays will be ignored
 
         \ingroup manip_func_join
     */
@@ -409,24 +415,110 @@ namespace af
        \param[in]  cond is the conditional array.
        \param[in]  b is the replacement value.
 
-       \note Values of \p a are replaced with corresponding values of \p b, when \p cond is false.
+       \note Values of \p a are replaced with value \p b, when \p cond is false.
 
        \ingroup data_func_replace
     */
     AFAPI void replace(array &a, const array  &cond, const double &b);
 #endif
 
+#if AF_API_VERSION >= 37
     /**
-      @}
+       \param[in] in is the input array to be padded
+       \param[in] beginPadding informs the number of elements to be
+                  padded at beginning of each dimension
+       \param[in] endPadding informs the number of elements to be
+                  padded at end of each dimension
+       \param[in] padFillType is indicates what values should fill padded region
+
+       \return the padded array
+
+       \ingroup data_func_pad
     */
+    AFAPI array pad(const array &in, const dim4 &beginPadding,
+                    const dim4 &endPadding, const borderType padFillType);
+#endif
+
+#if AF_API_VERSION >= 39
+    /**
+       \param[inout]  a is the input array
+       \param[in]  cond is the conditional array.
+       \param[in]  b is the replacement scalar value.
+
+       \note Values of \p a are replaced with value \p b, when \p cond is false.
+
+       \ingroup data_func_replace
+    */
+    AFAPI void replace(array &a, const array &cond, const long long b);
+
+    /**
+       \param[inout]  a is the input array
+       \param[in]  cond is the conditional array.
+       \param[in]  b is the replacement scalar value.
+
+       \note Values of \p a are replaced with value \p b, when \p cond is false.
+
+       \ingroup data_func_replace
+    */
+    AFAPI void replace(array &a, const array &cond,
+                       const unsigned long long b);
+
+    /**
+       \param[in]  cond is the conditional array
+       \param[in]  a is the array containing elements from the true part of the
+                   condition
+       \param[in]  b is a scalar assigned to \p out when \p cond is false
+       \return  the output containing elements of \p a when \p cond is true
+                else the value \p b
+
+       \ingroup data_func_select
+    */
+    AFAPI array select(const array &cond, const array &a, const long long b);
+
+    /**
+       \param[in]  cond is the conditional array
+       \param[in]  a is the array containing elements from the true part of the
+                   condition
+       \param[in]  b is a scalar assigned to \p out when \p cond is false
+       \return  the output containing elements of \p a when \p cond is true
+                else the value \p b
+
+       \ingroup data_func_select
+    */
+    AFAPI array select(const array &cond, const array &a,
+                       const unsigned long long b);
+
+    /**
+       \param[in]  cond is the conditional array
+       \param[in]  a is a scalar assigned to \p out when \p cond is true
+       \param[in]  b is the array containing elements from the false part of the
+                   condition
+       \return  the output containing the value \p a when \p cond is true else
+                elements from \p b
+
+       \ingroup data_func_select
+    */
+    AFAPI array select(const array &cond, const long long a, const array &b);
+
+    /**
+       \param[in]  cond is the conditional array
+       \param[in]  a is a scalar assigned to \p out when \p cond is true
+       \param[in]  b is the array containing elements from the false part of the
+                   condition
+       \return  the output containing the value \p a when \p cond is true else
+                elements from \p b
+
+       \ingroup data_func_select
+    */
+    AFAPI array select(const array &cond, const unsigned long long a,
+                       const array &b);
+#endif
 }
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
     /**
         \param[out] arr is the generated array of given type
         \param[in] val is the value of each element in the generated array
@@ -473,9 +565,6 @@ extern "C" {
     */
 
     AFAPI af_err af_constant_ulong(af_array *arr, const unsigned long long val, const unsigned ndims, const dim_t * const dims);
-    /**
-       @}
-    */
 
     /**
         \param[out] out is the generated array
@@ -539,6 +628,8 @@ extern "C" {
         \param[in] first is the first input array
         \param[in] second is the second input array
 
+        \note empty arrays will be ignored
+
         \ingroup manip_func_join
     */
     AFAPI af_err af_join(af_array *out, const int dim, const af_array first, const af_array second);
@@ -552,6 +643,8 @@ extern "C" {
         \param[in] dim is the dimension along which join occurs
         \param[in] n_arrays number of arrays to join
         \param[in] inputs is an array of af_arrays containing handles to the arrays to be joined
+
+        \note empty arrays will be ignored
 
         \ingroup manip_func_join
     */
@@ -643,9 +736,6 @@ extern "C" {
         \ingroup data_func_upper
     */
     AFAPI af_err af_upper(af_array *out, const af_array in, bool is_unit_diag);
-    /**
-      @}
-    */
 
 #if AF_API_VERSION >= 31
     /**
@@ -707,6 +797,111 @@ extern "C" {
        \ingroup data_func_replace
     */
     AFAPI af_err af_replace_scalar(af_array a, const af_array cond, const double b);
+#endif
+
+#if AF_API_VERSION >= 37
+    /**
+       \param[out] out is the padded array
+       \param[in] in is the input array to be padded
+       \param[in] begin_ndims is size of \p l_dims array
+       \param[in] begin_dims array contains padding size at beginning of each
+                  dimension
+       \param[in] end_ndims is size of \p u_dims array
+       \param[in] end_dims array contains padding sizes at end of each dimension
+       \param[in] pad_fill_type is indicates what values should fill
+                  padded region
+
+       \ingroup data_func_pad
+    */
+    AFAPI af_err af_pad(af_array *out, const af_array in,
+                        const unsigned begin_ndims,
+                        const dim_t *const begin_dims, const unsigned end_ndims,
+                        const dim_t *const end_dims,
+                        const af_border_type pad_fill_type);
+#endif
+
+#if AF_API_VERSION >= 39
+    /**
+       \param[inout]  a is the input array
+       \param[in]  cond is the conditional array.
+       \param[in]  b is the replacement array.
+
+       \note Values of \p a are replaced with corresponding values of \p b, when
+       \p cond is false.
+
+       \ingroup data_func_replace
+    */
+    AFAPI af_err af_replace_scalar_long(af_array a, const af_array cond,
+                                        const long long b);
+
+    /**
+       \param[inout]  a is the input array
+       \param[in]  cond is the conditional array.
+       \param[in]  b is the replacement array.
+
+       \note Values of \p a are replaced with corresponding values of \p b, when
+       \p cond is false.
+
+       \ingroup data_func_replace
+    */
+    AFAPI af_err af_replace_scalar_ulong(af_array a, const af_array cond,
+                                         const unsigned long long b);
+
+    /**
+       \param[out] out is the output containing elements of \p a when \p cond is
+       true else elements from \p b
+       \param[in]  cond is the conditional array
+       \param[in]  a is the array containing elements from the true part of the
+       condition
+       \param[in]  b is a scalar assigned to \p out when \p cond is
+       false
+
+       \ingroup data_func_select
+    */
+    AFAPI af_err af_select_scalar_r_long(af_array *out, const af_array cond,
+                                         const af_array a, const long long b);
+
+    /**
+       \param[out] out is the output containing elements of \p a when \p cond is
+       true else elements from \p b
+       \param[in]  cond is the conditional array
+       \param[in]  a is the array containing elements from the true part of the
+       condition
+       \param[in]  b is a scalar assigned to \p out when \p cond is
+       false
+
+       \ingroup data_func_select
+    */
+    AFAPI af_err af_select_scalar_r_ulong(af_array *out, const af_array cond,
+                                          const af_array a,
+                                          const unsigned long long b);
+
+    /**
+       \param[out] out is the output containing elements of \p a when \p cond is
+       true else elements from \p b
+       \param[in]  cond is the conditional array
+       \param[in]  a is a scalar assigned to \p out when \p cond is true
+       \param[in]  b is the array containing elements from the false part of the
+       condition
+
+       \ingroup data_func_select
+    */
+    AFAPI af_err af_select_scalar_l_long(af_array *out, const af_array cond,
+                                         const long long a, const af_array b);
+
+    /**
+       \param[out] out is the output containing elements of \p a when \p cond is
+       true else elements from \p b
+       \param[in]  cond is the conditional array
+       \param[in]  a is a scalar assigned to \p out when \p cond is true
+       \param[in]  b is the array containing elements from the false part of the
+       condition
+
+       \ingroup data_func_select
+    */
+    AFAPI af_err af_select_scalar_l_ulong(af_array *out, const af_array cond,
+                                          const unsigned long long a,
+                                          const af_array b);
 #endif
 
 #ifdef __cplusplus

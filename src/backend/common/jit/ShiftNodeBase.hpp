@@ -26,26 +26,53 @@ template<typename BufferNode>
 class ShiftNodeBase : public Node {
    private:
     std::shared_ptr<BufferNode> m_buffer_node;
-    const std::array<int, 4> m_shifts;
+    std::array<int, 4> m_shifts;
 
    public:
-    ShiftNodeBase(const char *type_str, const char *name_str,
-                  std::shared_ptr<BufferNode> buffer_node,
+    ShiftNodeBase(const af::dtype type, std::shared_ptr<BufferNode> buffer_node,
                   const std::array<int, 4> shifts)
-        : Node(type_str, name_str, 0, {})
-        , m_buffer_node(buffer_node)
-        , m_shifts(shifts) {}
+        : Node(type, 0, {}), m_buffer_node(buffer_node), m_shifts(shifts) {
+        static_assert(std::is_nothrow_move_assignable<ShiftNodeBase>::value,
+                      "ShiftNode is not move assignable");
+        static_assert(std::is_nothrow_move_constructible<ShiftNodeBase>::value,
+                      "ShiftNode is not move constructible");
+    }
 
-    bool isLinear(dim_t dims[4]) const final {
+    /// Default move copy constructor
+    ShiftNodeBase(const ShiftNodeBase &other) = default;
+
+    /// Default move constructor
+    ShiftNodeBase(ShiftNodeBase &&other) = default;
+
+    /// Default move/copy assignment operator(Rule of 4)
+    ShiftNodeBase &operator=(ShiftNodeBase node) noexcept {
+        swap(node);
+        return *this;
+    }
+
+    std::unique_ptr<Node> clone() final {
+        return std::make_unique<ShiftNodeBase>(*this);
+    }
+
+    // Swap specilization
+    void swap(ShiftNodeBase &other) noexcept {
+        using std::swap;
+        Node::swap(other);
+        swap(m_buffer_node, other.m_buffer_node);
+        swap(m_shifts, other.m_shifts);
+    }
+
+    bool isLinear(const dim_t dims[4]) const final {
         UNUSED(dims);
         return false;
     }
 
-    void genKerName(std::stringstream &kerStream,
+    void genKerName(std::string &kerString,
                     const common::Node_ids &ids) const final {
-        kerStream << "_" << m_name_str;
-        kerStream << std::setw(3) << std::setfill('0') << std::dec << ids.id
-                  << std::dec;
+        kerString += '_';
+        kerString += getNameStr();
+        kerString += ',';
+        kerString += std::to_string(ids.id);
     }
 
     void genParams(std::stringstream &kerStream, int id,
@@ -69,17 +96,22 @@ class ShiftNodeBase : public Node {
 
     void genOffsets(std::stringstream &kerStream, int id,
                     bool is_linear) const final {
-        detail::generateShiftNodeOffsets(kerStream, id, is_linear, m_type_str);
+        detail::generateShiftNodeOffsets(kerStream, id, is_linear,
+                                         getTypeStr());
     }
 
     void genFuncs(std::stringstream &kerStream,
                   const common::Node_ids &ids) const final {
-        detail::generateShiftNodeRead(kerStream, ids.id, m_type_str);
+        detail::generateShiftNodeRead(kerStream, ids.id, getTypeStr());
     }
 
     void getInfo(unsigned &len, unsigned &buf_count,
                  unsigned &bytes) const final {
         m_buffer_node->getInfo(len, buf_count, bytes);
+    }
+
+    std::string getNameStr() const final {
+        return std::string("Sh") + getShortName(m_type);
     }
 };
 }  // namespace common

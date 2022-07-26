@@ -7,18 +7,24 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#include <common/err_common.hpp>
 #include <solve.hpp>
 
-#if defined(WITH_LINEAR_ALGEBRA)
 #include <err_cpu.hpp>
-#include <handle.hpp>
+
+#if defined(WITH_LINEAR_ALGEBRA)
+#include <copy.hpp>
 #include <lapack_helper.hpp>
 #include <math.hpp>
-#include <platform.hpp>
+#if USE_MKL
+#include <mkl_version.h>
+#endif
 #include <queue.hpp>
 #include <af/dim4.hpp>
-#include <cassert>
+#include <algorithm>
+#include <complex>
+#include <vector>
+
+using af::dim4;
 
 namespace cpu {
 
@@ -28,6 +34,30 @@ using gesv_func_def = int (*)(ORDER_TYPE, int, int, T *, int, int *, T *, int);
 template<typename T>
 using gels_func_def = int (*)(ORDER_TYPE, char, int, int, int, T *, int, T *,
                               int);
+
+#ifdef AF_USE_MKL_BATCH
+template<typename T>
+using getrf_batch_strided_func_def =
+    void (*)(const MKL_INT *m, const MKL_INT *n, T *a, const MKL_INT *lda,
+             const MKL_INT *stride_a, MKL_INT *ipiv, const MKL_INT *stride_ipiv,
+             const MKL_INT *batch_size, MKL_INT *info);
+
+#if INTEL_MKL_VERSION >= 20210004
+template<typename T>
+using getrs_batch_strided_func_def = void (*)(
+    const char *trans, const MKL_INT *n, const MKL_INT *nrhs, const T *a,
+    const MKL_INT *lda, const MKL_INT *stride_a, const MKL_INT *ipiv,
+    const MKL_INT *stride_ipiv, T *b, const MKL_INT *ldb,
+    const MKL_INT *stride_b, const MKL_INT *batch_size, MKL_INT *info);
+#else
+template<typename T>
+using getrs_batch_strided_func_def =
+    void (*)(const char *trans, const MKL_INT *n, const MKL_INT *nrhs, T *a,
+             const MKL_INT *lda, const MKL_INT *stride_a, MKL_INT *ipiv,
+             const MKL_INT *stride_ipiv, T *b, const MKL_INT *ldb,
+             const MKL_INT *stride_b, const MKL_INT *batch_size, MKL_INT *info);
+#endif
+#endif
 
 template<typename T>
 using getrs_func_def = int (*)(ORDER_TYPE, char, int, int, const T *, int,
@@ -59,6 +89,70 @@ SOLVE_FUNC(gels, double, d)
 SOLVE_FUNC(gels, cfloat, c)
 SOLVE_FUNC(gels, cdouble, z)
 
+#ifdef AF_USE_MKL_BATCH
+
+template<typename T>
+struct mkl_type {
+    using type = T;
+};
+template<>
+struct mkl_type<std::complex<float>> {
+    using type = MKL_Complex8;
+};
+template<>
+struct mkl_type<std::complex<double>> {
+    using type = MKL_Complex16;
+};
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnoexcept-type"
+template<typename T>
+getrf_batch_strided_func_def<T> getrf_batch_strided_func();
+
+template<>
+getrf_batch_strided_func_def<float> getrf_batch_strided_func<float>() {
+    return &sgetrf_batch_strided;
+}
+template<>
+getrf_batch_strided_func_def<double> getrf_batch_strided_func<double>() {
+    return &dgetrf_batch_strided;
+}
+template<>
+getrf_batch_strided_func_def<MKL_Complex8>
+getrf_batch_strided_func<MKL_Complex8>() {
+    return &cgetrf_batch_strided;
+}
+template<>
+getrf_batch_strided_func_def<MKL_Complex16>
+getrf_batch_strided_func<MKL_Complex16>() {
+    return &zgetrf_batch_strided;
+}
+
+template<typename T>
+getrs_batch_strided_func_def<T> getrs_batch_strided_func();
+
+template<>
+getrs_batch_strided_func_def<float> getrs_batch_strided_func<float>() {
+    return &sgetrs_batch_strided;
+}
+template<>
+getrs_batch_strided_func_def<double> getrs_batch_strided_func<double>() {
+    return &dgetrs_batch_strided;
+}
+template<>
+getrs_batch_strided_func_def<MKL_Complex8>
+getrs_batch_strided_func<MKL_Complex8>() {
+    return &cgetrs_batch_strided;
+}
+template<>
+getrs_batch_strided_func_def<MKL_Complex16>
+getrs_batch_strided_func<MKL_Complex16>() {
+    return &zgetrs_batch_strided;
+}
+
+#pragma GCC diagnostic pop
+#endif
+
 SOLVE_FUNC_DEF(getrs)
 SOLVE_FUNC(getrs, float, s)
 SOLVE_FUNC(getrs, double, d)
@@ -79,7 +173,9 @@ Array<T> solveLU(const Array<T> &A, const Array<int> &pivot, const Array<T> &b,
     int NRHS   = b.dims()[1];
     Array<T> B = copyArray<T>(b);
 
-    auto func = [=](CParam<T> A, Param<T> B, CParam<int> pivot, int N, int NRHS) {
+    // NOLINTNEXTLINE
+    auto func = [=](CParam<T> A, Param<T> B, CParam<int> pivot, int N,
+                    int NRHS) {
         getrs_func<T>()(AF_LAPACK_COL_MAJOR, 'N', N, NRHS, A.get(),
                         A.strides(1), pivot.get(), B.get(), B.strides(1));
     };
@@ -107,6 +203,60 @@ Array<T> triangleSolve(const Array<T> &A, const Array<T> &b,
     return B;
 }
 
+#ifdef AF_USE_MKL_BATCH
+
+template<typename T>
+Array<T> generalSolveBatched(const Array<T> &a, const Array<T> &b,
+                             const af_mat_prop options) {
+    using std::vector;
+    int batches = a.dims()[2] * a.dims()[3];
+
+    dim4 aDims = a.dims();
+    dim4 bDims = b.dims();
+    int M      = aDims[0];
+    int N      = aDims[1];
+    int K      = bDims[1];
+    int MN     = std::min(M, N);
+
+    int lda     = a.strides()[1];
+    int astride = a.strides()[2];
+
+    vector<int> ipiv(MN * batches);
+    int ipivstride = MN;
+
+    int ldb     = b.strides()[1];
+    int bstride = b.strides()[2];
+
+    vector<int> info(batches, 0);
+
+    char trans = 'N';
+
+    Array<T> A = copyArray<T>(a);
+    Array<T> B = copyArray<T>(b);
+
+    auto getrf_rs = [](char TRANS, int M, int N, int K, Param<T> a, int LDA,
+                       int ASTRIDE, vector<int> IPIV, int IPIVSTRIDE,
+                       Param<T> b, int LDB, int BSTRIDE, int BATCH_SIZE,
+                       vector<int> INFO) {
+        getrf_batch_strided_func<typename mkl_type<T>::type>()(
+            &M, &N, reinterpret_cast<typename mkl_type<T>::type *>(a.get()),
+            &LDA, &ASTRIDE, IPIV.data(), &IPIVSTRIDE, &BATCH_SIZE, INFO.data());
+
+        getrs_batch_strided_func<typename mkl_type<T>::type>()(
+            &TRANS, &M, &K,
+            reinterpret_cast<typename mkl_type<T>::type *>(a.get()), &LDA,
+            &ASTRIDE, IPIV.data(), &IPIVSTRIDE,
+            reinterpret_cast<typename mkl_type<T>::type *>(b.get()), &LDB,
+            &BSTRIDE, &BATCH_SIZE, INFO.data());
+    };
+
+    getQueue().enqueue(getrf_rs, trans, M, N, K, A, lda, astride, ipiv,
+                       ipivstride, B, ldb, bstride, batches, info);
+
+    return B;
+}
+#endif
+
 template<typename T>
 Array<T> solve(const Array<T> &a, const Array<T> &b,
                const af_mat_prop options) {
@@ -114,33 +264,59 @@ Array<T> solve(const Array<T> &a, const Array<T> &b,
         return triangleSolve<T>(a, b, options);
     }
 
-    int M = a.dims()[0];
-    int N = a.dims()[1];
+#ifdef AF_USE_MKL_BATCH
+    if (a.dims()[2] > 1 || a.dims()[3] > 1) {
+        return generalSolveBatched(a, b, options);
+    }
+#endif
+
+    const dim4 NullShape(0, 0, 0, 0);
+
+    dim4 aDims = a.dims();
+    int batchz = aDims[2];
+    int batchw = aDims[3];
+
+    int M = aDims[0];
+    int N = aDims[1];
     int K = b.dims()[1];
 
     Array<T> A = copyArray<T>(a);
-    Array<T> B = padArray<T, T>(b, dim4(max(M, N), K));
 
-    if (M == N) {
-        Array<int> pivot = createEmptyArray<int>(dim4(N, 1, 1));
+    dim4 endPadding(max(M, N) - b.dims()[0], K - b.dims()[1], 0, 0);
+    Array<T> B = (endPadding == NullShape
+                      ? copyArray(b)
+                      : padArrayBorders(b, NullShape, endPadding, AF_PAD_ZERO));
 
-        auto func = [=](Param<T> A, Param<T> B, Param<int> pivot, int N,
-                        int K) {
-            gesv_func<T>()(AF_LAPACK_COL_MAJOR, N, K, A.get(), A.strides(1),
-                           pivot.get(), B.get(), B.strides(1));
-        };
-        getQueue().enqueue(func, A, B, pivot, N, K);
-    } else {
-        auto func = [=](Param<T> A, Param<T> B, int M, int N, int K) {
-            int sM = A.strides(1);
-            int sN = A.strides(2) / sM;
+    for (int i = 0; i < batchw; i++) {
+        for (int j = 0; j < batchz; j++) {
+            Param<T> pA(A.get() + A.strides()[2] * j + A.strides()[3] * i,
+                        A.dims(), A.strides());
+            Param<T> pB(B.get() + B.strides()[2] * j + B.strides()[3] * i,
+                        B.dims(), B.strides());
+            if (M == N) {
+                Array<int> pivot = createEmptyArray<int>(dim4(N, 1, 1));
 
-            gels_func<T>()(AF_LAPACK_COL_MAJOR, 'N', M, N, K, A.get(),
-                           A.strides(1), B.get(), max(sM, sN));
-        };
-        B.resetDims(dim4(N, K));
-        getQueue().enqueue(func, A, B, M, N, K);
+                auto func = [](Param<T> A, Param<T> B, Param<int> pivot, int N,
+                               int K) {
+                    gesv_func<T>()(AF_LAPACK_COL_MAJOR, N, K, A.get(),
+                                   A.strides(1), pivot.get(), B.get(),
+                                   B.strides(1));
+                };
+                getQueue().enqueue(func, pA, pB, pivot, N, K);
+            } else {
+                auto func = [=](Param<T> A, Param<T> B, int M, int N, int K) {
+                    int sM = A.dims(0);
+                    int sN = A.dims(1);
+
+                    gels_func<T>()(AF_LAPACK_COL_MAJOR, 'N', M, N, K, A.get(),
+                                   A.strides(1), B.get(), max(sM, sN));
+                };
+                getQueue().enqueue(func, pA, pB, M, N, K);
+            }
+        }
     }
+
+    if (M != N) { B.resetDims(dim4(N, K, B.dims()[2], B.dims()[3])); }
 
     return B;
 }
@@ -154,13 +330,17 @@ namespace cpu {
 template<typename T>
 Array<T> solveLU(const Array<T> &A, const Array<int> &pivot, const Array<T> &b,
                  const af_mat_prop options) {
-    AF_ERROR("Linear Algebra is disabled on CPU", AF_ERR_NOT_CONFIGURED);
+    AF_ERROR(
+        "This version of ArrayFire was built without linear algebra routines",
+        AF_ERR_NOT_CONFIGURED);
 }
 
 template<typename T>
 Array<T> solve(const Array<T> &a, const Array<T> &b,
                const af_mat_prop options) {
-    AF_ERROR("Linear Algebra is disabled on CPU", AF_ERR_NOT_CONFIGURED);
+    AF_ERROR(
+        "This version of ArrayFire was built without linear algebra routines",
+        AF_ERR_NOT_CONFIGURED);
 }
 
 }  // namespace cpu

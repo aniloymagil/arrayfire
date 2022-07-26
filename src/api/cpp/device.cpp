@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <common/deprecated.hpp>
 #include <af/array.h>
 #include <af/backend.h>
 #include <af/compatible.h>
@@ -31,20 +32,19 @@ int getAvailableBackends() {
 }
 
 af::Backend getBackendId(const array &in) {
-    af::Backend result = (af::Backend)0;
+    auto result = static_cast<af::Backend>(0);
     AF_THROW(af_get_backend_id(&result, in.get()));
     return result;
 }
 
 int getDeviceId(const array &in) {
     int device = getDevice();
-    ;
     AF_THROW(af_get_device_id(&device, in.get()));
     return device;
 }
 
 af::Backend getActiveBackend() {
-    af::Backend result = (af::Backend)0;
+    auto result = static_cast<af::Backend>(0);
     AF_THROW(af_get_active_backend(&result));
     return result;
 }
@@ -54,7 +54,7 @@ void info() { AF_THROW(af_info()); }
 const char *infoString(const bool verbose) {
     char *str = NULL;
     AF_THROW(af_info_string(&str, verbose));
-    return (const char *)str;
+    return str;
 }
 
 void deviceprop(char *d_name, char *d_platform, char *d_toolkit,
@@ -100,15 +100,24 @@ int deviceget() { return getDevice(); }
 
 void sync(int device) { AF_THROW(af_sync(device)); }
 
-///////////////////////////////////////////////////////////////////////////
-// Alloc and free host, pinned, zero copy
+// Alloc device memory
 void *alloc(const size_t elements, const af::dtype type) {
     void *ptr;
+    AF_DEPRECATED_WARNINGS_OFF
     AF_THROW(af_alloc_device(&ptr, elements * size_of(type)));
+    AF_DEPRECATED_WARNINGS_ON
     // FIXME: Add to map
     return ptr;
 }
 
+// Alloc device memory
+void *allocV2(const size_t bytes) {
+    void *ptr;
+    AF_THROW(af_alloc_device_v2(&ptr, bytes));
+    return ptr;
+}
+
+// Alloc pinned memory
 void *pinned(const size_t elements, const af::dtype type) {
     void *ptr;
     AF_THROW(af_alloc_pinned(&ptr, elements * size_of(type)));
@@ -118,7 +127,13 @@ void *pinned(const size_t elements, const af::dtype type) {
 
 void free(const void *ptr) {
     // FIXME: look up map and call the right free
-    AF_THROW(af_free_device((void *)ptr));
+    AF_DEPRECATED_WARNINGS_OFF
+    AF_THROW(af_free_device(const_cast<void *>(ptr)));
+    AF_DEPRECATED_WARNINGS_ON
+}
+
+void freeV2(const void *ptr) {
+    AF_THROW(af_free_device_v2(const_cast<void *>(ptr)));
 }
 
 void freePinned(const void *ptr) {
@@ -156,6 +171,7 @@ size_t getMemStepSize() {
     return size_bytes;
 }
 
+AF_DEPRECATED_WARNINGS_OFF
 #define INSTANTIATE(T)                                                        \
     template<>                                                                \
     AFAPI T *alloc(const size_t elements) {                                   \
@@ -182,5 +198,6 @@ INSTANTIATE(short)
 INSTANTIATE(unsigned short)
 INSTANTIATE(long long)
 INSTANTIATE(unsigned long long)
+AF_DEPRECATED_WARNINGS_ON
 
 }  // namespace af

@@ -12,7 +12,14 @@
 #include <platform.hpp>
 #include <queue.hpp>
 #include <memory>
+#include <mutex>
 #include <string>
+
+using common::memory::MemoryManagerBase;
+
+#ifndef AF_CPU_MEM_DEBUG
+#define AF_CPU_MEM_DEBUG 0
+#endif
 
 #if defined(AF_WITH_CPUID) &&                                       \
     (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || \
@@ -73,9 +80,9 @@ class CPUInfo {
     // Attributes
     std::string mVendorId;
     std::string mModelName;
-    int mNumSMT;
-    int mNumCores;
-    int mNumLogCpus;
+    unsigned mNumSMT;
+    unsigned mNumCores;
+    unsigned mNumLogCpus;
     bool mIsHTT;
 };
 
@@ -83,21 +90,38 @@ namespace cpu {
 
 class DeviceManager {
    public:
-    static const int MAX_QUEUES           = 1;
-    static const int NUM_DEVICES          = 1;
-    static const int ACTIVE_DEVICE_ID     = 0;
-    static const bool IS_DOUBLE_SUPPORTED = true;
+    static const int MAX_QUEUES            = 1;
+    static const int NUM_DEVICES           = 1;
+    static const unsigned ACTIVE_DEVICE_ID = 0;
+    static const bool IS_DOUBLE_SUPPORTED  = true;
 
     // TODO(umar): Half is not supported for BLAS and FFT on x86_64
-    static const bool IS_HALF_SUPPORTED   = true;
+    static const bool IS_HALF_SUPPORTED = true;
 
     static DeviceManager& getInstance();
 
     friend queue& getQueue(int device);
 
-    friend MemoryManager& memoryManager();
+    friend MemoryManagerBase& memoryManager();
+
+    friend void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManager();
+
+    // Pinned memory not supported in CPU
+    friend void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManagerPinned();
+
+    void resetMemoryManagerPinned();
 
     friend graphics::ForgeManager& forgeManager();
+
+    void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void resetMemoryManager();
 
     CPUInfo getCPUInfo() const;
 
@@ -112,9 +136,10 @@ class DeviceManager {
 
     // Attributes
     std::vector<queue> queues;
-    std::unique_ptr<MemoryManager> memManager;
     std::unique_ptr<graphics::ForgeManager> fgMngr;
     const CPUInfo cinfo;
+    std::unique_ptr<MemoryManagerBase> memManager;
+    std::mutex mutex;
 };
 
 }  // namespace cpu

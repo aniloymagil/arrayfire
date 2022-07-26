@@ -8,23 +8,20 @@
  ********************************************************/
 
 #pragma once
+
 #include <Array.hpp>
 #include <Param.hpp>
 #include <common/dispatch.hpp>
+#include <common/half.hpp>
 #include <debug_opencl.hpp>
 #include <iota.hpp>
 #include <kernel/sort_by_key.hpp>
 #include <kernel/sort_helper.hpp>
 #include <math.hpp>
 #include <memory.hpp>
-#include <program.hpp>
 #include <traits.hpp>
-#include <mutex>
-#include <string>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
+AF_DEPRECATED_WARNINGS_OFF
 #include <boost/compute/algorithm/copy.hpp>
 #include <boost/compute/algorithm/sort_by_key.hpp>
 #include <boost/compute/algorithm/transform.hpp>
@@ -35,16 +32,11 @@
 #include <boost/compute/functional/operator.hpp>
 #include <boost/compute/iterator/buffer_iterator.hpp>
 #include <boost/compute/types/pair.hpp>
+AF_DEPRECATED_WARNINGS_ON
 
 namespace compute = boost::compute;
 
-using cl::Buffer;
-using cl::EnqueueArgs;
-using cl::Kernel;
-using cl::KernelFunctor;
-using cl::NDRange;
-using cl::Program;
-using std::string;
+using common::half;
 
 template<typename Tk, typename Tv, bool isAscending>
 inline boost::compute::function<bool(const std::pair<Tk, Tv>,
@@ -230,10 +222,11 @@ void sort0ByKey(Param pKey, Param pVal, bool isAscending) {
     // But this is only useful before GPU is saturated
     // The GPU is saturated at around 1000,000 integers
     // Call batched sort only if both conditions are met
-    if (higherDims > 4 && pKey.info.dims[0] < 1000000)
+    if (higherDims > 4 && pKey.info.dims[0] < 1000000) {
         kernel::sortByKeyBatched<Tk, Tv>(pKey, pVal, 0, isAscending);
-    else
+    } else {
         kernel::sort0ByKeyIterative<Tk, Tv>(pKey, pVal, isAscending);
+    }
 }
 
 #define INSTANTIATE(Tk, Tv)                                           \
@@ -256,8 +249,8 @@ void sort0ByKey(Param pKey, Param pVal, bool isAscending) {
     INSTANTIATE(Tk, char)    \
     INSTANTIATE(Tk, uchar)   \
     INSTANTIATE(Tk, intl)    \
-    INSTANTIATE(Tk, uintl)
+    INSTANTIATE(Tk, uintl)   \
+    INSTANTIATE(Tk, half)
+
 }  // namespace kernel
 }  // namespace opencl
-
-#pragma GCC diagnostic pop

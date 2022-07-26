@@ -110,8 +110,12 @@ double eps<cdouble>() {
 template<typename T>
 double relEps(array in) {
     typedef typename af::dtype_traits<T>::base_type InBaseType;
-    return std::numeric_limits<InBaseType>::epsilon() *
-           std::max(in.dims(0), in.dims(1)) * af::max<double>(in);
+    double fixed_eps = eps<T>();
+    double calc_eps  = std::numeric_limits<InBaseType>::epsilon() *
+                      std::max(in.dims(0), in.dims(1)) * af::max<double>(in);
+    // Use the fixed values above if calculated error tolerance is unnecessarily
+    // too small
+    return std::max(fixed_eps, calc_eps);
 }
 
 typedef ::testing::Types<float, cfloat, double, cdouble> TestTypes;
@@ -155,7 +159,7 @@ TYPED_TEST(Pinverse, ApinvA_IsHermitian) {
 
 TYPED_TEST(Pinverse, Large) {
     array in = readTestInput<TypeParam>(
-        string(TEST_DIR "/pinverse/pinverse640x480.test"));
+        string(TEST_DIR "/pinverse/pinv_640x480_inputs.test"));
     array inpinv = pinverse(in);
     array out    = matmul(in, inpinv, in);
     ASSERT_ARRAYS_NEAR(in, out, relEps<TypeParam>(in));
@@ -163,7 +167,7 @@ TYPED_TEST(Pinverse, Large) {
 
 TYPED_TEST(Pinverse, LargeTall) {
     array in = readTestInput<TypeParam>(
-                   string(TEST_DIR "/pinverse/pinverse640x480.test"))
+                   string(TEST_DIR "/pinverse/pinv_640x480_inputs.test"))
                    .T();
     array inpinv = pinverse(in);
     array out    = matmul(in, inpinv, in);

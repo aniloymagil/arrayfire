@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <Array.hpp>
 #include <arith.hpp>
 #include <backend.hpp>
 #include <common/err_common.hpp>
@@ -18,7 +19,12 @@
 #include <af/vision.h>
 
 using af::dim4;
-using namespace detail;
+using detail::arithOp;
+using detail::Array;
+using detail::convolve;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
 
 template<typename T, typename accT>
 static af_array dog(const af_array& in, const int radius1, const int radius2) {
@@ -35,9 +41,9 @@ static af_array dog(const af_array& in, const int radius1, const int radius2) {
     AF_BATCH_KIND bkind = iDims[2] > 1 ? AF_BATCH_LHS : AF_BATCH_NONE;
 
     Array<accT> smth1 =
-        convolve<accT, accT, 2, false>(input, castArray<accT>(g1), bkind);
+        convolve<accT, accT>(input, castArray<accT>(g1), bkind, 2, false);
     Array<accT> smth2 =
-        convolve<accT, accT, 2, false>(input, castArray<accT>(g2), bkind);
+        convolve<accT, accT>(input, castArray<accT>(g2), bkind, 2, false);
     Array<accT> retVal = arithOp<accT, af_sub_t>(smth1, smth2, iDims);
 
     AF_CHECK(af_release_array(g1));

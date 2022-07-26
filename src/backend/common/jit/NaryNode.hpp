@@ -14,6 +14,7 @@
 #include <common/defines.hpp>
 #include <common/jit/Node.hpp>
 
+#include <nonstd/span.hpp>
 #include <array>
 #include <iomanip>
 #include <sstream>
@@ -24,40 +25,71 @@ namespace common {
 
 class NaryNode : public Node {
    private:
-    const int m_num_children;
-    const int m_op;
-    const std::string m_op_str;
+    int m_num_children;
+    const char *m_op_str;
+
+   protected:
+    af_op_t m_op;
 
    public:
-    NaryNode(const char *out_type_str, const char *name_str, const char *op_str,
-             const int num_children,
+    NaryNode(const af::dtype type, const char *op_str, const int num_children,
              const std::array<common::Node_ptr, Node::kMaxChildren> &&children,
-             const int op, const int height)
+             const af_op_t op, const int height)
         : common::Node(
-              out_type_str, name_str, height,
+              type, height,
               std::forward<
                   const std::array<common::Node_ptr, Node::kMaxChildren>>(
                   children))
         , m_num_children(num_children)
-        , m_op(op)
-        , m_op_str(op_str) {}
+        , m_op_str(op_str)
+        , m_op(op) {
+        static_assert(std::is_nothrow_move_assignable<NaryNode>::value,
+                      "NaryNode is not move assignable");
+        static_assert(std::is_nothrow_move_constructible<NaryNode>::value,
+                      "NaryNode is not move constructible");
+    }
 
-    void genKerName(std::stringstream &kerStream,
+    NaryNode(NaryNode &&other) noexcept = default;
+
+    NaryNode(const NaryNode &other) = default;
+
+    /// Default copy assignment operator
+    NaryNode &operator=(const NaryNode &node) = default;
+
+    /// Default move assignment operator
+    NaryNode &operator=(NaryNode &&node) noexcept = default;
+
+    void swap(NaryNode &other) noexcept {
+        using std::swap;
+        Node::swap(other);
+        swap(m_num_children, other.m_num_children);
+        swap(m_op_str, other.m_op_str);
+        swap(m_op, other.m_op);
+    }
+
+    af_op_t getOp() const noexcept final { return m_op; }
+
+    virtual std::unique_ptr<Node> clone() override {
+        return std::make_unique<NaryNode>(*this);
+    }
+
+    void genKerName(std::string &kerString,
                     const common::Node_ids &ids) const final {
         // Make the dec representation of enum part of the Kernel name
-        kerStream << "_" << std::setw(3) << std::setfill('0') << std::dec
-                  << m_op;
+        kerString += '_';
+        kerString += std::to_string(m_op);
+        kerString += ',';
         for (int i = 0; i < m_num_children; i++) {
-            kerStream << std::setw(3) << std::setfill('0') << std::dec
-                      << ids.child_ids[i];
+            kerString += std::to_string(ids.child_ids[i]);
+            kerString += ',';
         }
-        kerStream << std::setw(3) << std::setfill('0') << std::dec << ids.id
-                  << std::dec;
+        kerString += std::to_string(ids.id);
     }
 
     void genFuncs(std::stringstream &kerStream,
                   const common::Node_ids &ids) const final {
-        kerStream << m_type_str << " val" << ids.id << " = " << m_op_str << "(";
+        kerStream << getTypeStr() << " val" << ids.id << " = " << m_op_str
+                  << "(";
         for (int i = 0; i < m_num_children; i++) {
             if (i > 0) kerStream << ", ";
             kerStream << "val" << ids.child_ids[i];
@@ -69,13 +101,17 @@ class NaryNode : public Node {
 template<typename Ti, int N, typename FUNC>
 common::Node_ptr createNaryNode(
     const af::dim4 &odims, FUNC createNode,
-    std::array<const detail::Array<Ti>*, N> &&children) {
+    std::array<const detail::Array<Ti> *, N> &&children) {
     std::array<common::Node_ptr, N> childNodes;
-    for (int i = 0; i < N; i++) { childNodes[i] = children[i]->getNode(); }
+    std::array<common::Node *, N> nodes;
+    for (int i = 0; i < N; i++) {
+        childNodes[i] = move(children[i]->getNode());
+        nodes[i]      = childNodes[i].get();
+    }
 
     common::Node_ptr ptr = createNode(childNodes);
 
-    switch(static_cast<kJITHeuristics>(detail::passesJitHeuristics<Ti>(ptr.get()))) {
+    switch (detail::passesJitHeuristics<Ti>(nodes)) {
         case kJITHeuristics::Pass: {
             return ptr;
         }
@@ -89,16 +125,14 @@ common::Node_ptr createNaryNode(
                     max_height       = childNodes[i]->getHeight();
                 }
             }
-
             children[max_height_index]->eval();
             return createNaryNode<Ti, N>(odims, createNode, move(children));
         }
         case kJITHeuristics::MemoryPressure: {
-            for (auto &c : children) { c->eval(); } //TODO: use evalMultiple()
+            for (auto &c : children) { c->eval(); }  // TODO: use evalMultiple()
             return ptr;
         }
     }
-    assert("MISSING HEURISTIC EVALUATION" && 1 == 0);
     return ptr;
 }
 }  // namespace common

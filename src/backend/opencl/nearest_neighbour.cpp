@@ -24,9 +24,9 @@ template<typename T, typename To, af_match_type dist_type>
 void nearest_neighbour_(Array<uint>& idx, Array<To>& dist,
                         const Array<T>& query, const Array<T>& train,
                         const uint dist_dim, const uint n_dist) {
-    uint sample_dim  = (dist_dim == 0) ? 1 : 0;
-    const dim4 qDims = query.dims();
-    const dim4 tDims = train.dims();
+    uint sample_dim   = (dist_dim == 0) ? 1 : 0;
+    const dim4& qDims = query.dims();
+    const dim4& tDims = train.dims();
 
     const dim4 outDims(n_dist, qDims[sample_dim]);
     const dim4 distDims(tDims[sample_dim], qDims[sample_dim]);
@@ -39,7 +39,7 @@ void nearest_neighbour_(Array<uint>& idx, Array<To>& dist,
     Array<T> queryT = dist_dim == 0 ? transpose(query, false) : query;
     Array<T> trainT = dist_dim == 0 ? transpose(train, false) : train;
 
-    kernel::all_distances<T, To, dist_type>(tmp_dists, queryT, trainT, 1);
+    kernel::allDistances<T, To>(tmp_dists, queryT, trainT, 1, dist_type);
 
     topk(dist, idx, tmp_dists, n_dist, 0, AF_TOPK_MIN);
 }

@@ -18,12 +18,17 @@
 #include <af/image.h>
 
 using af::dim4;
-using namespace detail;
+using detail::arithOp;
+using detail::Array;
+using detail::createEmptyArray;
+using detail::createValueArray;
+using detail::join;
+using detail::scalar;
 
 template<typename T>
 static Array<T> mix(const Array<T>& X, const Array<T>& Y, double xf,
                     double yf) {
-    dim4 dims        = X.dims();
+    const dim4& dims = X.dims();
     Array<T> xf_cnst = createValueArray<T>(dims, xf);
     Array<T> yf_cnst = createValueArray<T>(dims, yf);
 
@@ -36,7 +41,7 @@ static Array<T> mix(const Array<T>& X, const Array<T>& Y, double xf,
 template<typename T>
 static Array<T> mix(const Array<T>& X, const Array<T>& Y, const Array<T>& Z,
                     double xf, double yf, double zf) {
-    dim4 dims        = X.dims();
+    const dim4& dims = X.dims();
     Array<T> xf_cnst = createValueArray<T>(dims, xf);
     Array<T> yf_cnst = createValueArray<T>(dims, yf);
     Array<T> zf_cnst = createValueArray<T>(dims, zf);
@@ -52,10 +57,10 @@ static Array<T> mix(const Array<T>& X, const Array<T>& Y, const Array<T>& Z,
 template<typename T>
 static Array<T> digitize(const Array<T> ch, const double scale,
                          const double offset) {
-    dim4 dims     = ch.dims();
-    Array<T> base = createValueArray<T>(dims, scalar<T>(offset));
-    Array<T> cnst = createValueArray<T>(dims, scalar<T>(scale));
-    Array<T> scl  = arithOp<T, af_mul_t>(ch, cnst, dims);
+    const dim4& dims = ch.dims();
+    Array<T> base    = createValueArray<T>(dims, scalar<T>(offset));
+    Array<T> cnst    = createValueArray<T>(dims, scalar<T>(scale));
+    Array<T> scl     = arithOp<T, af_mul_t>(ch, cnst, dims);
     return arithOp<T, af_add_t>(scl, base, dims);
 }
 
@@ -79,7 +84,7 @@ static af_array convert(const af_array& in, const af_ycc_std standard) {
     // extract three channels as three slices
     // prepare sequence objects
     // get Array objects for corresponding channel views
-    const Array<T>& input = getArray<T>(in);
+    const Array<T> input = getArray<T>(in);
     std::vector<af_seq> indices(4, af_span);
 
     indices[2] = {0, 0, 1};
@@ -92,33 +97,36 @@ static af_array convert(const af_array& in, const af_ycc_std standard) {
     Array<T> Z = createSubArray(input, indices, false);
 
     if (isYCbCr2RGB) {
-        dim4 dims    = X.dims();
-        Array<T> yc  = createValueArray<T>(dims, 16);
-        Array<T> cc  = createValueArray<T>(dims, 128);
-        Array<T> Y_  = arithOp<T, af_sub_t>(X, yc, dims);
-        Array<T> Cb_ = arithOp<T, af_sub_t>(Y, cc, dims);
-        Array<T> Cr_ = arithOp<T, af_sub_t>(Z, cc, dims);
-        Array<T> R   = mix<T>(Y_, Cr_, INV_219, INV_112 * (1 - kr));
+        const dim4& dims = X.dims();
+        Array<T> yc      = createValueArray<T>(dims, 16);
+        Array<T> cc      = createValueArray<T>(dims, 128);
+        Array<T> Y_      = arithOp<T, af_sub_t>(X, yc, dims);
+        Array<T> Cb_     = arithOp<T, af_sub_t>(Y, cc, dims);
+        Array<T> Cr_     = arithOp<T, af_sub_t>(Z, cc, dims);
+        Array<T> R       = mix<T>(Y_, Cr_, INV_219, INV_112 * (1 - kr));
         Array<T> G =
             mix<T>(Y_, Cr_, Cb_, INV_219, INV_112 * (kr - 1) * kr * invKl,
                    INV_112 * (kb - 1) * kb * invKl);
         Array<T> B = mix<T>(Y_, Cb_, INV_219, INV_112 * (1 - kb));
         // join channels
-        Array<T> RG = join<T, T>(2, R, G);
-        return getHandle(join<T, T>(2, RG, B));
-    } else {
-        Array<T> Ey = mix<T>(X, Y, Z, kr, kl, kb);
-        Array<T> Ecr =
-            mix<T>(X, Y, Z, 0.5, 0.5 * kl / (kr - 1), 0.5 * kb / (kr - 1));
-        Array<T> Ecb =
-            mix<T>(X, Y, Z, 0.5 * kr / (kb - 1), 0.5 * kl / (kb - 1), 0.5);
-        Array<T> Y  = digitize<T>(Ey, 219.0, 16.0);
-        Array<T> Cr = digitize<T>(Ecr, 224.0, 128.0);
-        Array<T> Cb = digitize<T>(Ecb, 224.0, 128.0);
-        // join channels
-        Array<T> YCb = join<T, T>(2, Y, Cb);
-        return getHandle(join<T, T>(2, YCb, Cr));
+        dim4 odims(R.dims()[0], R.dims()[1], 3);
+        Array<T> rgbout = createEmptyArray<T>(odims);
+        join<T>(rgbout, 2, {R, G, B});
+        return getHandle(rgbout);
     }
+    Array<T> Ey = mix<T>(X, Y, Z, kr, kl, kb);
+    Array<T> Ecr =
+        mix<T>(X, Y, Z, 0.5, 0.5 * kl / (kr - 1), 0.5 * kb / (kr - 1));
+    Array<T> Ecb =
+        mix<T>(X, Y, Z, 0.5 * kr / (kb - 1), 0.5 * kl / (kb - 1), 0.5);
+    Array<T> Y_ = digitize<T>(Ey, 219.0, 16.0);
+    Array<T> Cr = digitize<T>(Ecr, 224.0, 128.0);
+    Array<T> Cb = digitize<T>(Ecb, 224.0, 128.0);
+    // join channels
+    dim4 odims(Y_.dims()[0], Y_.dims()[1], 3);
+    Array<T> ycbcrout = createEmptyArray<T>(odims);
+    join<T>(ycbcrout, 2, {Y_, Cb, Cr});
+    return getHandle(ycbcrout);
 }
 
 template<bool isYCbCr2RGB>

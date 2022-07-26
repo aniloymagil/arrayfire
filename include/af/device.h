@@ -106,40 +106,82 @@ namespace af
     /// @{
     /// \brief Allocates memory using ArrayFire's memory manager
     ///
-    /// \copydoc device_func_alloc
     /// \param[in] elements the number of elements to allocate
     /// \param[in] type is the type of the elements to allocate
-    /// \returns the pointer to the memory
+    /// \returns Pointer to the device memory on the current device. This is a
+    ///          CUDA device pointer for the CUDA backend. A cl::Buffer pointer
+    ///          from the cl2.hpp header on the OpenCL backend and a C pointer
+    ///          for the CPU backend
     ///
-    /// \note The device memory returned by this function is only freed if af::free() is called explicitly
-
+    /// \note The device memory returned by this function is only freed if
+    ///       af::free() is called explicitly
+    /// \deprecated Use allocV2 instead. allocV2 accepts number of bytes
+    ///             instead of number of elements and returns a cl_mem object
+    ///             instead of the cl::Buffer object for the OpenCL backend.
+    ///             Otherwise the functionallity is identical to af::alloc.
+    AF_DEPRECATED("Use af::allocV2 instead")
     AFAPI void *alloc(const size_t elements, const dtype type);
+
+#if AF_API_VERSION >= 38
+    /// \brief Allocates memory using ArrayFire's memory manager
+    ///
+    /// \param[in] bytes the number of bytes to allocate
+    /// \returns Pointer to the device memory on the current device. This is a
+    ///          CUDA device pointer for the CUDA backend. A cl_mem pointer
+    ///          on the OpenCL backend and a C pointer for the CPU backend
+    ///
+    /// \note The device memory returned by this function is only freed if
+    ///       af::freeV2() is called explicitly
+    AFAPI void *allocV2(const size_t bytes);
+#endif
 
     /// \brief Allocates memory using ArrayFire's memory manager
     //
-    /// \copydoc device_func_alloc
     /// \param[in] elements the number of elements to allocate
-    /// \returns the pointer to the memory
+    /// \returns Pointer to the device memory on the current device. This is a
+    ///          CUDA device pointer for the CUDA backend. A cl::Buffer pointer
+    ///          from the cl2.hpp header on the OpenCL backend and a C pointer
+    ///          for the CPU backend
     ///
     /// \note the size of the memory allocated is the number of \p elements *
-    ///         sizeof(type)
-    ///
-    /// \note The device memory returned by this function is only freed if af::free() is called explicitly
-    template<typename T>
-    T* alloc(const size_t elements);
+    ///       sizeof(type)
+    /// \note The device memory returned by this function is only freed if
+    ///       af::free() is called explicitly
+    /// \deprecated Use allocV2 instead. allocV2 accepts number of bytes
+    ///             instead of number of elements and returns a cl_mem object
+    ///             instead of the cl::Buffer object for the OpenCL backend.
+    ///             Otherwise the functionallity is identical to af::alloc.
+    template <typename T>
+    AF_DEPRECATED("Use af::allocV2 instead")
+    T *alloc(const size_t elements);
     /// @}
 
     /// \ingroup device_func_free
     ///
     /// \copydoc device_func_free
-    /// \param[in] ptr the memory to free
+    /// \param[in] ptr the memory allocated by the af::alloc function that
+    ///                will be freed
     ///
-    /// This function will free a device pointer even if it has been previously locked.
+    /// \note This function will free a device pointer even if it has been
+    ///       previously locked.
+    /// \deprecated Use af::freeV2 instead. af_alloc_device_v2 returns a
+    ///             cl_mem object instead of the cl::Buffer object for the
+    ///             OpenCL backend. Otherwise the functionallity is identical
+    AF_DEPRECATED("Use af::freeV2 instead")
     AFAPI void free(const void *ptr);
+
+#if AF_API_VERSION >= 38
+    /// \ingroup device_func_free
+    /// \copydoc device_func_free
+    /// \param[in] ptr The pointer returned by af::allocV2
+    ///
+    /// This function will free a device pointer even if it has been previously
+    /// locked.
+    AFAPI void freeV2(const void *ptr);
+#endif
 
     /// \ingroup device_func_pinned
     /// @{
-    ///
     /// \copydoc device_func_pinned
     ///
     /// \param[in] elements the number of elements to allocate
@@ -236,12 +278,14 @@ namespace af
     AFAPI void deviceGC();
     /// @}
 
-    /// \brief Set the resolution of memory chunks
+    /// \brief Set the resolution of memory chunks. Works only with the default
+    /// memory manager - throws if a custom memory manager is set.
     ///
     /// \ingroup device_func_mem
     AFAPI void setMemStepSize(const size_t size);
 
-    /// \brief Get the resolution of memory chunks
+    /// \brief Get the resolution of memory chunks. Works only with the default
+    /// memory manager - throws if a custom memory manager is set.
     ///
     /// \ingroup device_func_mem
     AFAPI size_t getMemStepSize();
@@ -310,21 +354,74 @@ extern "C" {
     AFAPI af_err af_sync(const int device);
 
     /**
+       \brief Allocates memory using ArrayFire's memory manager
        \ingroup device_func_alloc
 
        This device memory returned by this function can only be freed using
        af_free_device
+
+       \param [out] ptr Pointer to the device memory on the current device. This
+                        is a CUDA device pointer for the CUDA backend. A
+                        cl::Buffer pointer on the OpenCL backend and a C pointer
+                        for the CPU backend
+       \param [in] bytes The number of bites to allocate on the device
+
+       \returns AF_SUCCESS if a pointer could be allocated. AF_ERR_NO_MEM if
+                there is no memory
+       \deprecated Use af_alloc_device_v2 instead. af_alloc_device_v2 returns a
+                   cl_mem object instead of the cl::Buffer object for the OpenCL
+                   backend. Otherwise the functionallity is identical
     */
+    AF_DEPRECATED("Use af_alloc_device_v2 instead")
     AFAPI af_err af_alloc_device(void **ptr, const dim_t bytes);
 
     /**
-       \ingroup device_func_free
+       \brief Returns memory to ArrayFire's memory manager.
 
        This function will free a device pointer even if it has been previously
        locked.
+
+       \param[in] ptr The pointer allocated by af_alloc_device to be freed
+
+       \deprecated Use af_free_device_v2 instead. The new function handles the
+                   new behavior of the af_alloc_device_v2 function.
+       \ingroup device_func_free
     */
+    AF_DEPRECATED("Use af_free_device_v2 instead")
     AFAPI af_err af_free_device(void *ptr);
 
+#if AF_API_VERSION >= 38
+    /**
+       \brief Allocates memory using ArrayFire's memory manager
+
+       This device memory returned by this function can only be freed using
+       af_free_device_v2.
+
+       \param [out] ptr Pointer to the device memory on the current device. This
+                        is a CUDA device pointer for the CUDA backend. A
+                        cl::Buffer pointer on the OpenCL backend and a C pointer
+                        for the CPU backend
+       \param [in] bytes The number of bites to allocate on the device
+
+       \returns AF_SUCCESS if a pointer could be allocated. AF_ERR_NO_MEM if
+                there is no memory
+       \ingroup device_func_alloc
+    */
+    AFAPI af_err af_alloc_device_v2(void **ptr, const dim_t bytes);
+
+    /**
+       \brief Returns memory to ArrayFire's memory manager.
+
+       This function will free a device pointer even if it has been previously
+       locked.
+
+       \param[in] ptr The pointer allocated by af_alloc_device_v2 to be freed
+       \note this function will not work for pointers allocated using the
+             af_alloc_device function for all backends
+       \ingroup device_func_free
+    */
+    AFAPI af_err af_free_device_v2(void *ptr);
+#endif
     /**
        \ingroup device_func_pinned
     */
@@ -351,7 +448,7 @@ extern "C" {
 
     /**
        Create array from device memory
-       \ingroup construct_mat
+       \ingroup c_api_mat
     */
     AFAPI af_err af_device_array(af_array *arr, void *data, const unsigned ndims, const dim_t * const dims, const af_dtype type);
 
@@ -380,9 +477,9 @@ extern "C" {
        \param [in] msg A message to print before the table
        \param [in] device_id print the memory info of the specified device.
        -1 signifies active device.
-      
+
        \returns AF_SUCCESS if successful
-      
+
        \ingroup device_func_mem
     */
     AFAPI af_err af_print_mem_info(const char *msg, const int device_id);
@@ -395,13 +492,17 @@ extern "C" {
     AFAPI af_err af_device_gc();
 
     /**
-       Set the minimum memory chunk size
+       Set the minimum memory chunk size. Works only with the default
+       memory manager - returns an error if a custom memory manager is set.
+
        \ingroup device_func_mem
     */
     AFAPI af_err af_set_mem_step_size(const size_t step_bytes);
 
     /**
-       Get the minimum memory chunk size
+       Get the minimum memory chunk size. Works only with the default
+       memory manager - returns an error if a custom memory manager is set.
+
        \ingroup device_func_mem
     */
     AFAPI af_err af_get_mem_step_size(size_t *step_bytes);
@@ -474,6 +575,49 @@ extern "C" {
     */
     AFAPI af_err af_get_device_ptr(void **ptr, const af_array arr);
 
+#if AF_API_VERSION >= 38
+    /**
+       Sets the path where the kernels generated at runtime will be cached
+
+       Sets the path where the kernels generated at runtime will be stored to
+       cache for later use. The files in this directory can be safely deleted.
+       The default location for these kernels is in $HOME/.arrayfire on Unix
+       systems and in the ArrayFire temp directory on Windows.
+
+       \param[in] path The location where the kernels will be stored
+       \param[in] override_env if true this path will take precedence over the
+                               AF_JIT_KERNEL_CACHE_DIRECTORY environment variable.
+                               If false, the environment variable takes precedence
+                               over this path.
+
+       \returns AF_SUCCESS if the variable is set. AF_ERR_ARG if path is NULL.
+       \ingroup device_func_mem
+    */
+    AFAPI af_err af_set_kernel_cache_directory(const char* path,
+                                               int override_env);
+
+    /**
+       Gets the path where the kernels generated at runtime will be cached
+
+       Gets the path where the kernels generated at runtime will be stored to
+       cache for later use. The files in this directory can be safely deleted.
+       The default location for these kernels is in $HOME/.arrayfire on Unix
+       systems and in the ArrayFire temp directory on Windows.
+
+       \param[out] length The length of the path array. If \p path is NULL, the
+                          length of the current path is assigned to this pointer
+       \param[out] path The path of the runtime generated kernel cache
+                         variable. If NULL, the current path length is assigned
+                         to \p length
+       \returns AF_SUCCESS if the variable is set.
+                AF_ERR_ARG if path and length are null at the same time.
+                AF_ERR_SIZE if \p length not sufficient enought to store the
+                            path
+       \ingroup device_func_mem
+    */
+    AFAPI af_err af_get_kernel_cache_directory(size_t *length, char *path);
+
+#endif
 
 #ifdef __cplusplus
 }

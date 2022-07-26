@@ -1,6 +1,440 @@
 Release Notes {#releasenotes}
 ==============
 
+v3.8.2
+======
+
+## Improvements
+
+- Optimize JIT by removing some consecutive cast operations \PR{3031}
+- Add driver checks checks for CUDA 11.5 and 11.6 \PR{3203}
+- Improve the timing algorithm used for timeit \PR{3185}
+- Dynamically link against CUDA numeric libraries by default \PR{3205}
+- Add support for pruning CUDA binaries to reduce static binary sizes \PR{3234} \PR{3237}
+- Remove unused cuDNN libraries from installations \PR{3235}
+- Add support to staticly link NVRTC libraries after CUDA 11.5 \PR{3236}
+- Add support for compiling with ccache when building the CUDA backend \PR{3241}
+- Make cuSparse an optional runtime dependency \PR{3240}
+
+## Fixes
+
+- Fix issue with consecutive moddims operations in the CPU backend \PR{3232}
+- Better floating point comparisons for tests \PR{3212}
+- Fix several warnings and inconsistencies with doxygen and documentation \PR{3226}
+- Fix issue when passing empty arrays into join \PR{3211}
+- Fix default value for the `AF_COMPUTE_LIBRARY` when not set \PR{3228}
+- Fix missing symbol issue when MKL is staticly linked \PR{3244}
+- Remove linking of OpenCL's library to the unified backend \PR{3244}
+
+## Contributions
+
+Special thanks to our contributors:
+[Jacob Kahn](https://github.com/jacobkahn)
+[Willy Born](https://github.com/willyborn)
+
+v3.8.1
+======
+
+## Improvements
+
+- moddims now uses JIT approach for certain special cases - \PR{3177}
+- Embed Version Info in Windows DLLs - \PR{3025} 
+- OpenCL device max parameter is now queries from device properties - \PR{3032} 
+- JIT Performance Optimization: Unique funcName generation sped up - \PR{3040} 
+- Improved readability of log traces  - \PR{3050} 
+- Use short function name in non-debug build error messages - \PR{3060} 
+- SIFT/GLOH are now available as part of website binaries - \PR{3071} 
+- Short-circuit zero elements case in detail::copyArray backend function - \PR{3059} 
+- Speedup of kernel caching mechanism - \PR{3043} 
+- Add short-circuit check for empty Arrays in JIT evalNodes - \PR{3072} 
+- Performance optimization of indexing using dynamic thread block sizes - \PR{3111} 
+- ArrayFire starting with this release will use Intel MKL single dynamic library which resolves lot of linking issues unified library had when user applications used MKL themselves - \PR{3120} 
+- Add shortcut check for zero elements in af_write_array - \PR{3130} 
+- Speedup join by eliminating temp buffers for cascading joins - \PR{3145} 
+- Added batch support for solve - \PR{1705} 
+- Use pinned memory to copy device pointers in CUDA solve - \PR{1705} 
+- Added package manager instructions to docs - \PR{3076} 
+- CMake Build Improvements - \PR{3027} , \PR{3089} , \PR{3037} , \PR{3072} , \PR{3095} , \PR{3096} , \PR{3097} , \PR{3102} , \PR{3106} , \PR{3105} , \PR{3120} , \PR{3136} , \PR{3135} , \PR{3137} , \PR{3119} , \PR{3150} , \PR{3138} , \PR{3156} , \PR{3139} , \PR{1705} , \PR{3162} 
+- CPU backend improvements - \PR{3010} , \PR{3138} , \PR{3161} 
+- CUDA backend improvements - \PR{3066} , \PR{3091} , \PR{3093} , \PR{3125} , \PR{3143} , \PR{3161} 
+- OpenCL backend improvements - \PR{3091} , \PR{3068} , \PR{3127} , \PR{3010} , \PR{3039} , \PR{3138} , \PR{3161} 
+- General(including JIT) performance improvements across backends - \PR{3167} 
+- Testing improvements - \PR{3072} , \PR{3131} , \PR{3151} , \PR{3141} , \PR{3153} , \PR{3152} , \PR{3157} , \PR{1705} , \PR{3170} , \PR{3167} 
+- Update CLBlast to latest version - \PR{3135} , \PR{3179} 
+- Improved Otsu threshold computation helper in canny algorithm - \PR{3169} 
+- Modified default parameters for fftR2C and fftC2R C++ API from 0 to 1.0 - \PR{3178} 
+- Use appropriate MKL getrs_batch_strided API based on MKL Versions - \PR{3181} 
+
+## Fixes
+
+- Fixed a bug JIT kernel disk caching - \PR{3182} 
+- Fixed stream used by thrust(CUDA backend) functions - \PR{3029}  
+- Added workaround for new cuSparse API that was added by CUDA amid fix releases - \PR{3057} 
+- Fixed `const` array indexing inside `gfor` - \PR{3078} 
+- Handle zero elements in copyData to host - \PR{3059} 
+- Fixed double free regression in OpenCL backend - \PR{3091} 
+- Fixed an infinite recursion bug in NaryNode JIT Node - \PR{3072} 
+- Added missing input validation check in sparse-dense arithmetic operations - \PR{3129} 
+- Fixed bug in `getMappedPtr` in OpenCL due to invalid lambda capture - \PR{3163} 
+- Fixed bug in `getMappedPtr` on Arrays that are not ready - \PR{3163} 
+- Fixed edgeTraceKernel for CPU devices on OpenCL backend - \PR{3164} 
+- Fixed windows build issue(s) with VS2019 - \PR{3048}
+- API documentation fixes - \PR{3075} , \PR{3076} , \PR{3143} , \PR{3161} 
+- CMake Build Fixes - \PR{3088} 
+- Fixed the tutorial link in README - \PR{3033} 
+- Fixed function name typo in timing tutorial - \PR{3028} 
+- Fixed couple of bugs in CPU backend canny implementation - \PR{3169} 
+- Fixed reference count of array(s) used in JIT operations. It is related to arrayfire's internal memory book keeping. The behavior/accuracy of arrayfire code wasn't broken earlier. It corrected the reference count to be of optimal value in the said scenarios. This may potentially reduce memory usage in some narrow cases - \PR{3167} 
+- Added assert that checks if topk is called with a negative value for k - \PR{3176} 
+- Fixed an Issue where countByKey would give incorrect results for any n > 128 - \PR{3175} 
+
+## Contributions
+
+Special thanks to our contributors:
+[HO-COOH][https://github.com/HO-COOH]
+[Willy Born][https://github.com/willyborn]
+[Gilad Avidov][https://github.com/avidov]
+[Pavan Yalamanchili][https://github.com/pavanky]
+
+v3.8.0
+======
+
+Major Updates
+--------
+- Non-uniform(ragged) reductions \PR{2786}
+- Bit-wise not operator support for array and C API (af\_bitnot) \PR{2865}
+- Initialization list constructor for array class \PR{2829} \PR{2987}
+
+Improvements
+------------
+- New API for following statistics function: cov, var and stdev - \PR{2986}
+- allocV2 and freeV2 which return cl\_mem on OpenCL backend \PR{2911}
+- Move constructor and move assignment operator for Dim4 class \PR{2946}
+- Support for CUDA 11.1 and Compute 8.6 \PR{3023}
+- Fix af::feature copy constructor for multi-threaded sceanarios \PR{3022}
+
+v3.7.3
+======
+
+Improvements
+------------
+- Add f16 support for histogram - \PR{2984}
+- Update confidence connected components example with better illustration - \PR{2968}
+- Enable disk caching of OpenCL kernel binaries - \PR{2970}
+- Refactor extension of kernel binaries stored to disk `.bin` - \PR{2970}
+- Add minimum driver versions for CUDA toolkit 11 in internal map - \PR{2982}
+- Improve warnings messages from run-time kernel compilation functions - \PR{2996}
+
+Fixes
+-----
+- Fix bias factor of variance in var_all and cov functions - \PR{2986}
+- Fix a race condition in confidence connected components function for OpenCL backend - \PR{2969}
+- Safely ignore disk cache failures in CUDA backend for compiled kernel binaries - \PR{2970}
+- Fix randn by passing in correct values to Box-Muller - \PR{2980}
+- Fix rounding issues in Box-Muller function used for RNG - \PR{2980}
+- Fix problems in RNG for older compute architectures with fp16 - \PR{2980}  \PR{2996}
+- Fix performance regression of approx functions - \PR{2977}
+- Remove assert that check that signal/filter types have to be the same - \PR{2993}
+- Fix `checkAndSetDevMaxCompute` when the device cc is greater than max - \PR{2996}
+- Fix documentation errors and warnings - \PR{2973} , \PR{2987}
+- Add missing opencl-arrayfire interoperability functions in unified backend  - \PR{2981}
+
+Contributions
+-------------
+Special thanks to our contributors:
+[P. J. Reed](https://github.com/pjreed)
+
+v3.7.2
+======
+
+Improvements
+------------
+- Cache CUDA kernels to disk to improve load times(Thanks to \@cschreib-ibex) \PR{2848}
+- Staticly link against cuda libraries \PR{2785}
+- Make cuDNN an optional build dependency \PR{2836}
+- Improve support for different compilers and OS \PR{2876} \PR{2945} \PR{2925} \PR{2942} \PR{2943} \PR{2945} \PR{2958}
+- Improve performance of join and transpose on CPU \PR{2849}
+- Improve documentation \PR{2816} \PR{2821} \PR{2846} \PR{2918} \PR{2928} \PR{2947}
+- Reduce binary size using NVRTC and template reducing instantiations \PR{2849} \PR{2861} \PR{2890} \PR{2957}
+- reduceByKey performance improvements \PR{2851} \PR{2957}
+- Improve support for Intel OpenCL GPUs \PR{2855}
+- Allow staticly linking against MKL \PR{2877} (Sponsered by SDL)
+- Better support for older CUDA toolkits \PR{2923}
+- Add support for CUDA 11 \PR{2939}
+- Add support for ccache for faster builds \PR{2931}
+- Add support for the conan package manager on linux \PR{2875}
+- Propagate build errors up the stack in AFError exceptions \PR{2948} \PR{2957}
+- Improve runtime dependency library loading \PR{2954}
+- Improved cuDNN runtime checks and warnings \PR{2960}
+- Document af\_memory\_manager\_* native memory return values \PR{2911}
+
+Fixes
+-----
+- Bug crash when allocating large arrays \PR{2827}
+- Fix various compiler warnings \PR{2827} \PR{2849} \PR{2872} \PR{2876}
+- Fix minor leaks in OpenCL functions \PR{2913}
+- Various continuous integration related fixes \PR{2819}
+- Fix zero padding with convolv2NN \PR{2820}
+- Fix af_get_memory_pressure_threshold return value \PR{2831}
+- Increased the max filter length for morph
+- Handle empty array inputs for LU, QR, and Rank functions \PR{2838}
+- Fix FindMKL.cmake script for sequential threading library \PR{2840} \PR{2952}
+- Various internal refactoring \PR{2839} \PR{2861} \PR{2864} \PR{2873} \PR{2890} \PR{2891} \PR{2913} \PR{2959}
+- Fix OpenCL 2.0 builtin function name conflict \PR{2851}
+- Fix error caused when releasing memory with multiple devices \PR{2867}
+- Fix missing set stacktrace symbol from unified API \PR{2915}
+- Fix zero padding issue in convolve2NN \PR{2820}
+- Fixed bugs in ReduceByKey \PR{2957}
+
+Contributions
+-------------
+Special thanks to our contributors:
+[Corentin Schreiber](https://github.com/cschreib-ibex)
+[Jacob Kahn](https://github.com/jacobkahn)
+[Paul Jurczak](https://github.com/pauljurczak)
+[Christoph Junghans](https://github.com/junghans)
+
+v3.7.1
+======
+
+Improvements
+------------
+
+- Improve mtx download for test data \PR{2742}
+- Documentation improvements \PR{2754} \PR{2792} \PR{2797}
+- Remove verbose messages in older CMake versions \PR{2773}
+- Reduce binary size with the use of nvrtc  \PR{2790}
+- Use texture memory to load LUT in orb and fast \PR{2791}
+- Add missing print function for f16 \PR{2784}
+- Add checks for f16 support in the CUDA backend \PR{2784}
+- Create a thrust policy to intercept tmp buffer allocations \PR{2806}
+
+Fixes
+-----
+
+- Fix segfault on exit when ArrayFire is not initialized in the main thread
+- Fix support for CMake 3.5.1 \PR{2771} \PR{2772} \PR{2760}
+- Fix evalMultiple if the input array sizes aren't the same \PR{2766}
+- Fix error when AF_BACKEND_DEFAULT is passed directly to backend \PR{2769}
+- Workaround name collision with AMD OpenCL implementation \PR{2802}
+- Fix on-exit errors with the unified backend \PR{2769}
+- Fix check for f16 compatibility in OpenCL \PR{2773}
+- Fix matmul on Intel OpenCL when passing same array as input \PR{2774}
+- Fix CPU OpenCL blas batching \PR{2774}
+- Fix memory pressure in the default memory manager \PR{2801}
+
+Contributions
+-------------
+Special thanks to our contributors:
+[padentomasello](https://github.com/padentomasello)
+[glavaux2](https://github.com/glavaux2)
+
+v3.7.0
+======
+
+Major Updates
+-------------
+
+- Added the ability to customize the memory manager(Thanks jacobkahn and flashlight) \PR{2461}
+- Added 16-bit floating point support for several functions \PR{2413} \PR{2587} \PR{2585} \PR{2587} \PR{2583}
+- Added sumByKey, productByKey, minByKey, maxByKey, allTrueByKey, anyTrueByKey, countByKey \PR{2254}
+- Added confidence connected components \PR{2748}
+- Added neural network based convolution and gradient functions \PR{2359}
+- Added a padding function \PR{2682}
+- Added pinverse for pseudo inverse \PR{2279}
+- Added support for uniform ranges in approx1 and approx2 functions. \PR{2297}
+- Added support to write to preallocated arrays for some functions \PR{2599} \PR{2481} \PR{2328} \PR{2327}
+- Added meanvar function \PR{2258}
+- Add support for sparse-sparse arithmetic support
+- Added rsqrt function for reciprocal square root
+- Added a lower level af_gemm function for general matrix multiplication \PR{2481}
+- Added a function to set the cuBLAS math mode for the CUDA backend \PR{2584}
+- Separate debug symbols into separate files \PR{2535}
+- Print stacktraces on errors \PR{2632}
+- Support move constructor for af::array \PR{2595}
+- Expose events in the public API \PR{2461}
+- Add setAxesLabelFormat to format labels on graphs \PR{2495}
+
+Improvements
+------------
+
+- Better error messages for systems with driver or device incompatibilities \PR{2678} \PR{2448}
+- Optimized unified backend function calls
+- Optimized anisotropic smoothing \PR{2713}
+- Optimized canny filter for CUDA and OpenCL
+- Better MKL search script
+- Better logging of different submodules in ArrayFire \PR{2670} \PR{2669}
+- Improve documentation \PR{2665} \PR{2620} \PR{2615} \PR{2639} \PR{2628} \PR{2633} \PR{2622} \PR{2617} \PR{2558} \PR{2326} \PR{2515}
+- Optimized af::array assignment \PR{2575}
+- Update the k-means example to display the result \PR{2521}
+
+
+Fixes
+-----
+
+- Fix multi-config generators
+- Fix access errors in canny
+- Fix segfault in the unified backend if no backends are available
+- Fix access errors in scan-by-key
+- Fix sobel operator
+- Fix an issue with the random number generator and s16
+- Fix issue with boolean product reduction
+- Fix array_proxy move constructor
+- Fix convolve3 launch configuration
+- Fix an issue where the fft function modified the input array \PR{2520}
+
+Contributions
+-------------
+Special thanks to our contributors:
+[Jacob Khan](https://github.com/jacobkahn)
+[William Tambellini](https://github.com/WilliamTambellini)
+[Alexey Kuleshevich](https://github.com/lehins)
+[Richard Barnes](https://github.com/r-barnes)
+[Gaika](https://github.com/gaika)
+[ShalokShalom](https://github.com/ShalokShalom)
+
+
+v3.6.4
+======
+
+Bug Fixes
+---------
+- Address a JIT performance regression due to moving kernel arguments to shared memory \PR{2501}
+- Fix the default parameter for setAxisTitle \PR{2491}
+
+v3.6.3
+======
+
+Improvements
+------------
+- Graphics are now a runtime dependency instead of a link time dependency \PR{2365}
+- Reduce the CUDA backend binary size using runtime compilation of kernels \PR{2437}
+- Improved batched matrix multiplication on the CPU backend by using Intel MKL's
+  `cblas_Xgemm_batched`\PR{2206}
+- Print JIT kernels to disk or stream using the `AF_JIT_KERNEL_TRACE`
+  environment variable \PR{2404}
+- `void*` pointers are now allowed as arguments to `af::array::write()` \PR{2367}
+- Slightly improve the efficiency of JITed tile operations \PR{2472}
+- Make the random number generation on the CPU backend to be consistent with
+  CUDA and OpenCL \PR{2435}
+- Handled very large JIT tree generations \PR{2484} \PR{2487}
+
+Bug Fixes
+---------
+- Fixed `af::array::array_proxy` move assignment operator \PR{2479}
+- Fixed input array dimensions validation in svdInplace() \PR{2331}
+- Fixed the typedef declaration for window resource handle \PR{2357}.
+- Increase compatibility with GCC 8 \PR{2379}
+- Fixed `af::write` tests \PR{2380}
+- Fixed a bug in broadcast step of 1D exclusive scan \PR{2366}
+- Fixed OpenGL related build errors on OSX \PR{2382}
+- Fixed multiple array evaluation. Performance improvement. \PR{2384}
+- Fixed buffer overflow and expected output of kNN SSD small test \PR{2445}
+- Fixed MKL linking order to enable threaded BLAS \PR{2444}
+- Added validations for forge module plugin availability before calling
+  resource cleanup \PR{2443}
+- Improve compatibility on MSVC toolchain(_MSC_VER > 1914) with the CUDA
+  backend \PR{2443}
+- Fixed BLAS gemm func generators for newest MSVC 19 on VS 2017 \PR{2464}
+- Fix errors on exits when using the cuda backend with unified \PR{2470}
+
+Documentation
+-------------
+- Updated svdInplace() documentation following a bugfix \PR{2331}
+- Fixed a typo in matrix multiplication documentation \PR{2358}
+- Fixed a code snippet demostrating C-API use \PR{2406}
+- Updated hamming matcher implementation limitation \PR{2434}
+- Added illustration for the rotate function \PR{2453}
+
+Misc
+----
+- Use cudaMemcpyAsync instead of cudaMemcpy throughout the codebase \PR{2362}
+- Display a more informative error message if CUDA driver is incomptible
+  \PR{2421} \PR{2448}
+- Changed forge resource managemenet to use smart pointers \PR{2452}
+- Deprecated intl and uintl typedefs in API \PR{2360}
+- Enabled graphics by default for all builds starting with v3.6.3 \PR{2365}
+- Fixed several warnings \PR{2344} \PR{2356} \PR{2361}
+- Refactored initArray() calls to use createEmptyArray(). initArray() is for
+  internal use only by Array class. \PR{2361}
+- Refactored `void*` memory allocations to use unsigned char type \PR{2459}
+- Replaced deprecated MKL API with in-house implementations for sparse
+  to sparse/dense conversions \PR{2312}
+- Reorganized and fixed some internal backend API \PR{2356}
+- Updated compilation order of cuda files to speed up compile time \PR{2368}
+- Removed conditional graphics support builds after enabling runtime
+  loading of graphics dependencies \PR{2365}
+- Marked graphics dependencies as optional in CPack RPM config \PR{2365}
+- Refactored a sparse arithmetic backend API \PR{2379}
+- Fixed const correctness of `af_device_array` API \PR{2396}
+- Update Forge to v1.0.4 \PR{2466}
+- Manage Forge resources from the DeviceManager class \PR{2381}
+- Fixed non-mkl & non-batch blas upstream call arguments \PR{2401}
+- Link MKL with OpenMP instead of TBB by default
+- use clang-format to format source code
+
+Contributions
+-------------
+Special thanks to our contributors:
+[Alessandro Bessi](https://github.com/alessandrobessi)
+[zhihaoy](https://github.com/zhihaoy)
+[Jacob Khan](https://github.com/jacobkahn)
+[William Tambellini](https://github.com/WilliamTambellini)
+
+v3.6.2
+======
+
+Features
+--------
+- Added support for batching on the `cond` argument in select() \PR{2243}
+- Added support for broadcasting batched matmul() \PR{2315}
+- Added support for multiple nearest neighbors in nearestNeighbour() \PR{2280}
+- Added support for clamp-to-edge padding as an `af_border_type` option \PR{2333}
+
+Improvements
+------------
+- Improved performance of morphological operations \PR{2238}
+- Fixed linking errors when compiling without Freeimage/Graphics \PR{2248}
+- Improved the usage of ArrayFire as a CMake subproject \PR{2290}
+- Enabled configuration of custom library path for loading dynamic backend
+  libraries \PR{2302}
+
+Bug Fixes
+---------
+- Fixed LAPACK definitions and linking errors \PR{2239}
+- Fixed overflow in dim4::ndims() \PR{2289}
+- Fixed pow() precision for integral types \PR{2305}
+- Fixed issues with tile() with a large repeat dimension \PR{2307}
+- Fixed svd() sub-array output on OpenCL \PR{2279}
+- Fixed grid-based indexing calculation in histogram() \PR{2230}
+- Fixed bug in indexing when used after reorder \PR{2311}
+- Fixed errors when exiting on Windows when using
+  [CLBlast](https://github.com/CNugteren/CLBlast) \PR{2222}
+- Fixed fallthrough error in medfilt1 \PR{2349}
+
+Documentation
+-------------
+- Improved unwrap() documentation \PR{2301}
+- Improved wrap() documentation \PR{2320}
+- Improved accum() documentation \PR{2298}
+- Improved tile() documentation \PR{2293}
+- Clarified approx1() and approx2() indexing in documentation \PR{2287}
+- Updated examples of [select()](@ref data_func_select) in detailed documentation
+  \PR{2277}
+- Updated lookup() examples \PR{2288}
+- Updated set operations' documentation \PR{2299}
+
+Misc
+----
+- `af*` libraries and dependencies directory changed to `lib64` \PR{2186}
+- Added new arrayfire ASSERT utility functions \PR{2249} \PR{2256} \PR{2257} \PR{2263}
+- Improved error messages in JIT \PR{2309}
+
+Contributions
+-------------
+Special thanks to our contributors: [Jacob Kahn](https://github.com/jacobkahn),
+[Vardan Akopian](https://github.com/vakopian)
+
 v3.6.1
 ======
 

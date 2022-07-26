@@ -31,20 +31,21 @@ Array<T> index(const Array<T>& in, const af_index_t idxrs[]) {
     }
 
     // retrieve dimensions, strides and offsets
-    dim4 iDims  = in.dims();
-    dim4 dDims  = in.getDataDims();
-    dim4 oDims  = toDims(seqs, iDims);
-    dim4 iOffs  = toOffset(seqs, dDims);
-    dim4 iStrds = in.strides();
+    const dim4& iDims = in.dims();
+    dim4 dDims        = in.getDataDims();
+    dim4 oDims        = toDims(seqs, iDims);
+    dim4 iOffs        = toOffset(seqs, dDims);
+    dim4 iStrds       = in.strides();
 
     for (dim_t i = 0; i < 4; ++i) {
-        p.isSeq[i] = idxrs[i].isSeq;
+        p.isSeq[i] = idxrs[i].isSeq ? 1 : 0;
         p.offs[i]  = iOffs[i];
         p.strds[i] = iStrds[i];
     }
 
-    Buffer* bPtrs[4];
+    cl::Buffer* bPtrs[4];
 
+    auto buf = cl::Buffer();
     std::vector<Array<uint>> idxArrs(4, createEmptyArray<uint>(dim4()));
     // look through indexs to read af_array indexs
     for (dim_t x = 0; x < 4; ++x) {
@@ -56,7 +57,7 @@ Array<T> index(const Array<T>& in, const af_index_t idxrs[]) {
             oDims[x] = idxArrs[x].elements();
         } else {
             // alloc an 1-element buffer to avoid OpenCL from failing
-            bPtrs[x] = bufferAlloc(sizeof(uint));
+            bPtrs[x] = &buf;
         }
     }
 
@@ -64,10 +65,6 @@ Array<T> index(const Array<T>& in, const af_index_t idxrs[]) {
     if (oDims.elements() == 0) { return out; }
 
     kernel::index<T>(out, in, p, bPtrs);
-
-    for (dim_t x = 0; x < 4; ++x) {
-        if (p.isSeq[x]) bufferFree(bPtrs[x]);
-    }
 
     return out;
 }

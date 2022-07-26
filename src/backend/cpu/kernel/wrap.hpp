@@ -10,11 +10,14 @@
 #pragma once
 #include <Param.hpp>
 #include <err_cpu.hpp>
+#include <math.hpp>
+
+#include <algorithm>
 
 namespace cpu {
 namespace kernel {
 
-template <typename T, int d>
+template<typename T, int d>
 void wrap_dim(Param<T> out, CParam<T> in, const dim_t wx, const dim_t wy,
               const dim_t sx, const dim_t sy, const dim_t px, const dim_t py) {
     const T *inPtr = in.get();
@@ -75,7 +78,7 @@ void wrap_dim(Param<T> out, CParam<T> in, const dim_t wx, const dim_t wy,
     }
 }
 
-template <typename T>
+template<typename T>
 void wrap_dim_dilated(Param<T> out, CParam<T> in, const dim_t wx,
                       const dim_t wy, const dim_t sx, const dim_t sy,
                       const dim_t px, const dim_t py, const dim_t dx,
@@ -92,8 +95,8 @@ void wrap_dim_dilated(Param<T> out, CParam<T> in, const dim_t wx,
 
     for (dim_t w = 0; w < idims[3]; w++) {
         for (dim_t z = 0; z < idims[2]; z++) {
-            dim_t cIn      = w * istrides[3] + z * istrides[2];
-            dim_t cOut     = w * ostrides[3] + z * ostrides[2];
+            dim_t cIn              = w * istrides[3] + z * istrides[2];
+            dim_t cOut             = w * ostrides[3] + z * ostrides[2];
             const data_t<T> *iptr_ = inPtr + cIn;
             data_t<T> *optr        = outPtr + cOut;
 
@@ -129,7 +132,8 @@ void wrap_dim_dilated(Param<T> out, CParam<T> in, const dim_t wx,
                             dim_t oloc =
                                 (ypad * ostrides[1] + xpad * ostrides[0]);
                             // FIXME: When using threads, atomize this
-                            optr[oloc] = static_cast<compute_t<T>>(optr[oloc]) + static_cast<compute_t<T>>(iptr[iloc]);
+                            optr[oloc] = static_cast<compute_t<T>>(optr[oloc]) +
+                                         static_cast<compute_t<T>>(iptr[iloc]);
                         }
                     }
                 }
@@ -138,5 +142,5 @@ void wrap_dim_dilated(Param<T> out, CParam<T> in, const dim_t wx,
     }
 }
 
-} // kernel namespace
-} // cpu namespace
+}  // namespace kernel
+}  // namespace cpu

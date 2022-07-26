@@ -9,29 +9,39 @@
 
 // This is the array implementation class.
 #pragma once
+
 #include <Param.hpp>
 #include <common/ArrayInfo.hpp>
+#include <common/MemoryManagerBase.hpp>
+#include <common/jit/Node.hpp>
 #include <jit/Node.hpp>
 #include <memory.hpp>
 #include <platform.hpp>
-#include <queue.hpp>
 
 #include <af/defines.h>
 #include <af/dim4.hpp>
 #include <af/seq.h>
 
+#include <nonstd/span.hpp>
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <vector>
 
 namespace cpu {
+
+namespace jit {
+template<typename T>
+class BufferNode;
+}
+
 namespace kernel {
 template<typename T>
-void evalArray(Param<T> in, jit::Node_ptr node);
+void evalArray(Param<T> in, common::Node_ptr node);
 
 template<typename T>
 void evalMultiple(std::vector<Param<T>> arrays,
-                  std::vector<jit::Node_ptr> nodes);
+                  std::vector<common::Node_ptr> nodes);
 
 }  // namespace kernel
 
@@ -42,11 +52,11 @@ using af::dim4;
 using std::shared_ptr;
 
 template<typename T>
-void evalMultiple(std::vector<Array<T> *> arrays);
+void evalMultiple(std::vector<Array<T> *> array_ptrs);
 
 // Creates a new Array object on the heap and returns a reference to it.
 template<typename T>
-Array<T> createNodeArray(const af::dim4 &dims, jit::Node_ptr node);
+Array<T> createNodeArray(const af::dim4 &dims, common::Node_ptr node);
 
 template<typename T>
 Array<T> createValueArray(const af::dim4 &dims, const T &value);
@@ -91,7 +101,7 @@ template<typename T>
 void destroyArray(Array<T> *A);
 
 template<typename T>
-kJITHeuristics passesJitHeuristics(jit::Node *node);
+kJITHeuristics passesJitHeuristics(nonstd::span<common::Node *> node);
 
 template<typename T>
 void *getDevicePtr(const Array<T> &arr) {
@@ -112,27 +122,55 @@ template<typename T>
 class Array {
     ArrayInfo info;  // Must be the first element of Array<T>
 
-    // data if parent. empty if child
+    /// Pointer to the data
     std::shared_ptr<T> data;
-    af::dim4 data_dims;
-    jit::Node_ptr node;
 
-    bool ready;
+    /// The shape of the underlying parent data.
+    af::dim4 data_dims;
+
+    /// Null if this a buffer node. Otherwise this points to a JIT node
+    common::Node_ptr node;
+
+    /// If true, the Array object is the parent. If false the data object points
+    /// to another array's data
     bool owner;
 
+    /// Default constructor
     Array() = default;
+
+    /// Creates an uninitialized array of a specific shape
     Array(dim4 dims);
 
     explicit Array(const af::dim4 &dims, T *const in_data, bool is_device,
                    bool copy_device = false);
     Array(const Array<T> &parent, const dim4 &dims, const dim_t &offset,
           const dim4 &stride);
-    explicit Array(const af::dim4 &dims, jit::Node_ptr n);
+    explicit Array(const af::dim4 &dims, common::Node_ptr n);
     Array(const af::dim4 &dims, const af::dim4 &strides, dim_t offset,
           T *const in_data, bool is_device = false);
 
    public:
+    Array<T>(const Array<T> &other) = default;
+    Array<T>(Array<T> &&other)      = default;
+
+    Array<T> &operator=(Array<T> other) noexcept {
+        swap(other);
+        return *this;
+    }
+
+    void swap(Array<T> &other) noexcept {
+        using std::swap;
+        swap(info, other.info);
+        swap(data, other.data);
+        swap(data_dims, other.data_dims);
+        swap(node, other.node);
+        swap(owner, other.owner);
+    }
+
     void resetInfo(const af::dim4 &dims) { info.resetInfo(dims); }
+
+    // Modifies the dimensions of the array without modifing the underlying
+    // data
     void resetDims(const af::dim4 &dims) { info.resetDims(dims); }
     void modDims(const af::dim4 &newDims) { info.modDims(newDims); }
     void modStrides(const af::dim4 &newStrides) { info.modStrides(newStrides); }
@@ -143,8 +181,8 @@ class Array {
 
     INFO_FUNC(const af_dtype &, getType)
     INFO_FUNC(const af::dim4 &, strides)
-    INFO_FUNC(size_t, elements)
-    INFO_FUNC(size_t, ndims)
+    INFO_FUNC(dim_t, elements)
+    INFO_FUNC(dim_t, ndims)
     INFO_FUNC(const af::dim4 &, dims)
     INFO_FUNC(int, getDevId)
 
@@ -174,7 +212,7 @@ class Array {
 
     ~Array() = default;
 
-    bool isReady() const { return ready; }
+    bool isReady() const { return static_cast<bool>(node) == false; }
 
     bool isOwner() const { return owner; }
 
@@ -212,10 +250,7 @@ class Array {
         return data.get() + (withOffset ? getOffset() : 0);
     }
 
-    int useCount() const {
-        if (!data.get()) eval();
-        return static_cast<int>(data.use_count());
-    }
+    int useCount() const { return static_cast<int>(data.use_count()); }
 
     operator Param<T>() {
         return Param<T>(this->get(), this->dims(), this->strides());
@@ -225,7 +260,8 @@ class Array {
         return CParam<T>(this->get(), this->dims(), this->strides());
     }
 
-    jit::Node_ptr getNode() const;
+    common::Node_ptr getNode() const;
+    common::Node_ptr getNode();
 
     friend void evalMultiple<T>(std::vector<Array<T> *> arrays);
 
@@ -239,15 +275,15 @@ class Array {
 
     friend Array<T> createEmptyArray<T>(const af::dim4 &dims);
     friend Array<T> createNodeArray<T>(const af::dim4 &dims,
-                                       jit::Node_ptr node);
+                                       common::Node_ptr node);
 
     friend Array<T> createSubArray<T>(const Array<T> &parent,
                                       const std::vector<af_seq> &index,
                                       bool copy);
 
-    friend void kernel::evalArray<T>(Param<T> in, jit::Node_ptr node);
+    friend void kernel::evalArray<T>(Param<T> in, common::Node_ptr node);
     friend void kernel::evalMultiple<T>(std::vector<Param<T>> arrays,
-                                        std::vector<jit::Node_ptr> nodes);
+                                        std::vector<common::Node_ptr> nodes);
 
     friend void destroyArray<T>(Array<T> *arr);
     friend void *getDevicePtr<T>(const Array<T> &arr);

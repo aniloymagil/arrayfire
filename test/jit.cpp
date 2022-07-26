@@ -7,13 +7,17 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
-#define GTEST_LINKED_AS_SHARED_LIBRARY 1
 #include <gtest/gtest.h>
 #include <testHelpers.hpp>
+#include <af/algorithm.h>
 #include <af/arith.h>
 #include <af/array.h>
 #include <af/data.h>
+#include <af/device.h>
+#include <af/gfor.h>
+#include <af/random.h>
 
+#include <numeric>
 #include <tuple>
 
 using af::array;
@@ -49,9 +53,10 @@ TEST(JIT, CPP_JIT_HASH) {
 
     // Creating a kernel
     {
-        array d    = a + b;
-        array e    = a + c;
-        array f1   = d * e - e;
+        array d  = a + b;
+        array e  = a + c;
+        array f1 = d * e - e;
+
         float* hF1 = f1.host<float>();
 
         for (int i = 0; i < num; i++) { ASSERT_EQ(hF1[i], valF1); }
@@ -233,8 +238,6 @@ TEST(JIT, CPP_common_node) {
 
     array x = tile(r, 1, r.dims(0));
     array y = tile(r.T(), r.dims(0), 1);
-    x.eval();
-    y.eval();
 
     vector<float> hx(x.elements());
     vector<float> hy(y.elements());
@@ -654,13 +657,11 @@ void testTwoLargeNonLinear(const af_dtype dt) {
     ASSERT_VEC_ARRAY_EQ(gold, a.dims(), c.as(f32));
 }
 
-TEST(JIT, TwoLargeNonLinear) {
-  testTwoLargeNonLinear(f32);
-}
+TEST(JIT, TwoLargeNonLinear) { testTwoLargeNonLinear(f32); }
 
 TEST(JIT, TwoLargeNonLinearHalf) {
-  if (noHalfTests(f16)) return;
-  testTwoLargeNonLinear(f16);
+    if (noHalfTests(f16)) return;
+    testTwoLargeNonLinear(f16);
 }
 
 std::string select_info(
@@ -738,7 +739,7 @@ TEST(JIT, AllBuffers) {
 
   int inc = 2;
   for(int ii = buffers/2; ii > 2; ii/=2) {
-      for(int i = 0; i < arrs.size(); i += inc) {
+      for(size_t i = 0; i < arrs.size(); i += inc) {
           arrs[i] = arrs[i] + arrs[i + inc/2];
       }
       inc *= 2;
@@ -790,4 +791,39 @@ TEST(JIT, DISABLED_ManyConstants) {
     // This still fails in the current implementation
     eval(res2, res4, res6);//, res8);
     af::sync();
+}
+
+TEST(JIT, getKernelCacheDirectory) {
+  size_t length = 0;
+  ASSERT_SUCCESS(af_get_kernel_cache_directory(&length, NULL));
+
+  std::string path;
+  path.resize(length);
+  ASSERT_SUCCESS(af_get_kernel_cache_directory(&length, &path.at(0)));
+}
+
+TEST(JIT, setKernelCacheDirectory) {
+  std::string path = ".";
+
+  // Get the old path so we can reset it after the test
+  size_t length = 0;
+  ASSERT_SUCCESS(af_get_kernel_cache_directory(&length, NULL));
+  std::string old_path;
+  old_path.resize(length);
+  ASSERT_SUCCESS(af_get_kernel_cache_directory(&length, &old_path.at(0)));
+
+  // Set cache directory to the new path
+  ASSERT_SUCCESS(af_set_kernel_cache_directory(path.c_str(), false));
+
+  // Get the new path for verification
+  size_t new_length = path.size();
+  std::string new_path;
+  new_path.resize(new_length);
+  ASSERT_SUCCESS(af_get_kernel_cache_directory(&new_length, &new_path.at(0)));
+
+  ASSERT_EQ(path, new_path);
+  ASSERT_EQ(path.size(), new_path.size());
+
+  // Reset to the old path
+  ASSERT_SUCCESS(af_set_kernel_cache_directory(old_path.c_str(), false));
 }

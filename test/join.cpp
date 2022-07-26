@@ -14,8 +14,10 @@
 #include <af/dim4.hpp>
 #include <af/index.h>
 #include <af/traits.hpp>
+
 #include <complex>
 #include <iostream>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -26,6 +28,7 @@ using af::dim4;
 using af::dtype_traits;
 using af::join;
 using af::randu;
+using af::seq;
 using af::sum;
 using std::endl;
 using std::string;
@@ -44,7 +47,8 @@ class Join : public ::testing::Test {
 
 // create a list of types to be tested
 typedef ::testing::Types<float, double, cfloat, cdouble, int, unsigned int,
-                         intl, uintl, char, unsigned char, short, ushort, af_half>
+                         intl, uintl, char, unsigned char, short, ushort,
+                         half_float::half>
     TestTypes;
 
 // register the type list
@@ -197,4 +201,68 @@ TEST(JoinMany1, CPP) {
     array output = join(dim, a0, a1, a2, a3);
     array gold   = join(dim, a0, join(dim, a1, join(dim, a2, a3)));
     ASSERT_EQ(sum<float>(output - gold), 0);
+}
+
+TEST(Join, DifferentSizes) {
+    array a = seq(10);
+    array b = seq(11);
+    array c = seq(12);
+
+    array d = join(0, a, b, c);
+
+    vector<float> ha(10);
+    vector<float> hb(11);
+    vector<float> hc(12);
+
+    for (size_t i = 0; i < ha.size(); i++) { ha[i] = i; }
+    for (size_t i = 0; i < hb.size(); i++) { hb[i] = i; }
+    for (size_t i = 0; i < hc.size(); i++) { hc[i] = i; }
+    vector<float> hgold(10 + 11 + 12);
+    vector<float>::iterator it = copy(ha.begin(), ha.end(), hgold.begin());
+    it                         = copy(hb.begin(), hb.end(), it);
+    it                         = copy(hc.begin(), hc.end(), it);
+
+    ASSERT_VEC_ARRAY_EQ(hgold, dim4(10 + 11 + 12), d);
+}
+
+TEST(Join, SameSize) {
+    array a = seq(10);
+    array b = seq(10);
+    array c = seq(10);
+
+    array d = join(0, a, b, c);
+
+    vector<float> ha(10);
+    vector<float> hb(10);
+    vector<float> hc(10);
+
+    for (size_t i = 0; i < ha.size(); i++) { ha[i] = i; }
+    for (size_t i = 0; i < hb.size(); i++) { hb[i] = i; }
+    for (size_t i = 0; i < hc.size(); i++) { hc[i] = i; }
+    vector<float> hgold(10 + 10 + 10);
+    vector<float>::iterator it = copy(ha.begin(), ha.end(), hgold.begin());
+    it                         = copy(hb.begin(), hb.end(), it);
+    it                         = copy(hc.begin(), hc.end(), it);
+
+    ASSERT_VEC_ARRAY_EQ(hgold, dim4(10 + 10 + 10), d);
+}
+
+TEST(Join, ManyEmpty) {
+    array gold = af::constant(0, 15, 5);
+    array a    = af::randn(5, 5);
+    array e;
+    array c  = af::randn(10, 5);
+    array ee = af::join(0, e, e);
+    ASSERT_EQ(ee.elements(), 0);
+    array eee = af::join(0, e, e, e);
+    ASSERT_EQ(eee.elements(), 0);
+
+    array eeac                     = af::join(0, e, e, a, c);
+    array eace                     = af::join(0, e, a, c, e);
+    array acee                     = af::join(0, a, c, e, e);
+    gold(af::seq(0, 4), af::span)  = a;
+    gold(af::seq(5, 14), af::span) = c;
+    ASSERT_ARRAYS_EQ(gold, eeac);
+    ASSERT_ARRAYS_EQ(gold, eace);
+    ASSERT_ARRAYS_EQ(gold, acee);
 }

@@ -18,8 +18,6 @@
 
 namespace common {
 
-using namespace detail;
-
 template<typename T>
 class SparseArray;
 
@@ -35,22 +33,29 @@ class SparseArrayBase {
    private:
     ArrayInfo
         info;  ///< NOTE: This must be the first element of SparseArray<T>.
-    af::storage stype;  ///< Storage format: CSR, CSC, COO
-    Array<int> rowIdx;  ///< Linear array containing row indices
-    Array<int> colIdx;  ///< Linear array containing col indices
+    af::storage stype;          ///< Storage format: CSR, CSC, COO
+    detail::Array<int> rowIdx;  ///< Linear array containing row indices
+    detail::Array<int> colIdx;  ///< Linear array containing col indices
 
    public:
-    SparseArrayBase(af::dim4 _dims, dim_t _nNZ, af::storage _storage,
+    SparseArrayBase(SparseArrayBase &&other) noexcept = default;
+    SparseArrayBase(const af::dim4 &_dims, dim_t _nNZ, af::storage _storage,
                     af_dtype _type);
 
-    SparseArrayBase(af::dim4 _dims, dim_t _nNZ, int *const _rowIdx,
+    SparseArrayBase(const af::dim4 &_dims, dim_t _nNZ, int *const _rowIdx,
                     int *const _colIdx, const af::storage _storage,
                     af_dtype _type, bool _is_device = false,
                     bool _copy_device = false);
 
-    SparseArrayBase(af::dim4 _dims, const Array<int> &_rowIdx,
-                    const Array<int> &_colIdx, const af::storage _storage,
-                    af_dtype _type, bool _copy = false);
+    SparseArrayBase(const af::dim4 &_dims, const detail::Array<int> &_rowIdx,
+                    const detail::Array<int> &_colIdx,
+                    const af::storage _storage, af_dtype _type,
+                    bool _copy = false);
+
+    SparseArrayBase &operator=(SparseArrayBase other) noexcept {
+        std::swap(*this, other);
+        return *this;
+    }
 
     /// A copy constructor for SparseArray
     ///
@@ -59,7 +64,7 @@ class SparseArrayBase {
     ///
     /// \param[in] in         The array that will be copied
     /// \param[in] deep_copy  If true a deep copy is performed
-    SparseArrayBase(const SparseArrayBase &in, bool deep_copy = false);
+    SparseArrayBase(const SparseArrayBase &base, bool deep_copy = false);
 
     ~SparseArrayBase();
 
@@ -103,13 +108,13 @@ class SparseArrayBase {
     }
 
     /// Returns the row indices for the corresponding values in the SparseArray
-    Array<int> &getRowIdx() { return rowIdx; }
-    const Array<int> &getRowIdx() const { return rowIdx; }
+    detail::Array<int> &getRowIdx() { return rowIdx; }
+    const detail::Array<int> &getRowIdx() const { return rowIdx; }
 
     /// Returns the column indices for the corresponding values in the
     /// SparseArray
-    Array<int> &getColIdx() { return colIdx; }
-    const Array<int> &getColIdx() const { return colIdx; }
+    detail::Array<int> &getColIdx() { return colIdx; }
+    const detail::Array<int> &getColIdx() const { return colIdx; }
 
     /// Returns the number of non-zero elements in the array.
     dim_t getNNZ() const;
@@ -127,32 +132,40 @@ template<typename T>
 class SparseArray {
    private:
     SparseArrayBase
-        base;         ///< This must be the first element of SparseArray<T>.
-    Array<T> values;  ///< Linear array containing actual values
+        base;  ///< This must be the first element of SparseArray<T>.
+    detail::Array<T> values;  ///< Linear array containing actual values
 
-    SparseArray(af::dim4 _dims, dim_t _nNZ, af::storage stype);
+    SparseArray(const af::dim4 &_dims, dim_t _nNZ, af::storage _storage);
 
-    explicit SparseArray(af::dim4 _dims, dim_t _nNZ, T *const _values,
+    explicit SparseArray(const af::dim4 &_dims, dim_t _nNZ, T *const _values,
                          int *const _rowIdx, int *const _colIdx,
                          const af::storage _storage, bool _is_device = false,
                          bool _copy_device = false);
 
-    SparseArray(af::dim4 _dims, const Array<T> &_values,
-                const Array<int> &_rowIdx, const Array<int> &_colIdx,
-                const af::storage _storage, bool _copy = false);
+    SparseArray(const af::dim4 &_dims, const detail::Array<T> &_values,
+                const detail::Array<int> &_rowIdx,
+                const detail::Array<int> &_colIdx, const af::storage _storage,
+                bool _copy = false);
 
     /// A copy constructor for SparseArray
     ///
     /// This constructor copies the \p in SparseArray and creates a new object
     /// from it. It can also perform a deep copy if the second argument is true.
     ///
-    /// \param[in] in         The array that will be copied
+    /// \param[in] other      The array that will be copied
     /// \param[in] deep_copy  If true a deep copy is performed
-    SparseArray(const SparseArray<T> &in, bool deep_copy);
+    SparseArray(const SparseArray<T> &other, bool deep_copy);
 
    public:
-    ~SparseArray();
+    SparseArray(const SparseArray<T> &other)     = default;
+    SparseArray(SparseArray<T> &&other) noexcept = default;
 
+    ~SparseArray() noexcept = default;
+
+    SparseArray<T> &operator=(SparseArray<T> other) noexcept {
+        std::swap(*this, other);
+        return *this;
+    }
 // Functions that call ArrayInfo object's functions
 #define INSTANTIATE_INFO(return_type, func) \
     return_type func() const { return base.func(); }
@@ -185,10 +198,10 @@ class SparseArray {
     INSTANTIATE_INFO(dim_t, getNNZ)
     INSTANTIATE_INFO(af::storage, getStorage)
 
-    Array<int> &getRowIdx() { return base.getRowIdx(); }
-    Array<int> &getColIdx() { return base.getColIdx(); }
-    const Array<int> &getRowIdx() const { return base.getRowIdx(); }
-    const Array<int> &getColIdx() const { return base.getColIdx(); }
+    detail::Array<int> &getRowIdx() { return base.getRowIdx(); }
+    detail::Array<int> &getColIdx() { return base.getColIdx(); }
+    const detail::Array<int> &getRowIdx() const { return base.getRowIdx(); }
+    const detail::Array<int> &getColIdx() const { return base.getColIdx(); }
 
 #undef INSTANTIATE_INFO
 
@@ -198,8 +211,8 @@ class SparseArray {
     }
 
     // Return the values array
-    Array<T> &getValues() { return values; }
-    const Array<T> &getValues() const { return values; }
+    detail::Array<T> &getValues() { return values; }
+    const detail::Array<T> &getValues() const { return values; }
 
     void eval() const {
         getValues().eval();
@@ -223,8 +236,8 @@ class SparseArray {
         const bool _copy);
 
     friend SparseArray<T> createArrayDataSparseArray<T>(
-        const af::dim4 &_dims, const Array<T> &_values,
-        const Array<int> &_rowIdx, const Array<int> &_colIdx,
+        const af::dim4 &_dims, const detail::Array<T> &_values,
+        const detail::Array<int> &_rowIdx, const detail::Array<int> &_colIdx,
         const af::storage _storage, const bool _copy);
 
     friend SparseArray<T> *initSparseArray<T>();

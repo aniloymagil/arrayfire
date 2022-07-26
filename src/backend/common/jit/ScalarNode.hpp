@@ -8,7 +8,9 @@
  ********************************************************/
 
 #pragma once
+#include <backend.hpp>
 #include <common/jit/Node.hpp>
+#include <af/traits.hpp>
 
 #include <math.hpp>
 #include <types.hpp>
@@ -23,20 +25,49 @@ class ScalarNode : public common::Node {
 
    public:
     ScalarNode(T val)
-        : Node(detail::getFullName<T>(), detail::shortname<T>(false), 0, {})
-        , m_val(val) {}
+        : Node(static_cast<af::dtype>(af::dtype_traits<T>::af_type), 0, {})
+        , m_val(val) {
+        static_assert(std::is_nothrow_move_assignable<ScalarNode>::value,
+                      "ScalarNode is not move assignable");
+        static_assert(std::is_nothrow_move_constructible<ScalarNode>::value,
+                      "ScalarNode is not move constructible");
+    }
 
-    void genKerName(std::stringstream& kerStream,
+    /// Default move copy constructor
+    ScalarNode(const ScalarNode& other) = default;
+
+    /// Default move constructor
+    ScalarNode(ScalarNode&& other) = default;
+
+    /// Default move/copy assignment operator(Rule of 4)
+    ScalarNode& operator=(ScalarNode node) noexcept {
+        swap(node);
+        return *this;
+    }
+
+    std::unique_ptr<Node> clone() final {
+        return std::make_unique<ScalarNode>(*this);
+    }
+
+    // Swap specilization
+    void swap(ScalarNode& other) noexcept {
+        using std::swap;
+        Node::swap(other);
+        swap(m_val, other.m_val);
+    }
+
+    void genKerName(std::string& kerString,
                     const common::Node_ids& ids) const final {
-        kerStream << "_" << m_name_str;
-        kerStream << std::setw(3) << std::setfill('0') << std::dec << ids.id
-                  << std::dec;
+        kerString += '_';
+        kerString += getTypeStr();
+        kerString += ',';
+        kerString += std::to_string(ids.id);
     }
 
     void genParams(std::stringstream& kerStream, int id,
                    bool is_linear) const final {
         UNUSED(is_linear);
-        kerStream << m_type_str << " scalar" << id << ", \n";
+        kerStream << getTypeStr() << " scalar" << id << ", \n";
     }
 
     int setArgs(int start_id, bool is_linear,
@@ -49,14 +80,17 @@ class ScalarNode : public common::Node {
 
     void genFuncs(std::stringstream& kerStream,
                   const common::Node_ids& ids) const final {
-        kerStream << m_type_str << " val" << ids.id << " = scalar" << ids.id
+        kerStream << getTypeStr() << " val" << ids.id << " = scalar" << ids.id
                   << ";\n";
     }
 
+    // Returns true if this node is a Buffer
+    virtual bool isScalar() const { return false; }
+
+    std::string getNameStr() const final { return detail::shortname<T>(false); }
+
     // Return the info for the params and the size of the buffers
-    virtual size_t getParamBytes() const final {
-        return sizeof(T);
-    }
+    virtual size_t getParamBytes() const final { return sizeof(T); }
 };
 
 }  // namespace common

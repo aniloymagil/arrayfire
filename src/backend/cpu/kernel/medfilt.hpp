@@ -8,15 +8,19 @@
  ********************************************************/
 
 #pragma once
+
 #include <Param.hpp>
+
 #include <algorithm>
 #include <vector>
 
 namespace cpu {
 namespace kernel {
 
-template<typename T, af_border_type Pad>
+template<typename T, af::borderType Pad>
 void medfilt1(Param<T> out, CParam<T> in, dim_t w_wid) {
+    constexpr bool IsValidPadType = (Pad == AF_PAD_ZERO || Pad == AF_PAD_SYM);
+
     const af::dim4 dims     = in.dims();
     const af::dim4 istrides = in.strides();
     const af::dim4 ostrides = out.strides();
@@ -55,6 +59,10 @@ void medfilt1(Param<T> out, CParam<T> in, dim_t w_wid) {
                                 im_roff = im_row * istrides[0];
                                 wind_vals.push_back(in_ptr[im_roff]);
                             } break;
+                            default:
+                                static_assert(IsValidPadType,
+                                              "Unsupported padding type");
+                                break;
                         }
                     }
 
@@ -74,8 +82,10 @@ void medfilt1(Param<T> out, CParam<T> in, dim_t w_wid) {
     }
 }
 
-template<typename T, af_border_type Pad>
+template<typename T, af::borderType Pad>
 void medfilt2(Param<T> out, CParam<T> in, dim_t w_len, dim_t w_wid) {
+    constexpr bool IsValidPadType = (Pad == AF_PAD_ZERO || Pad == AF_PAD_SYM);
+
     const af::dim4 dims     = in.dims();
     const af::dim4 istrides = in.strides();
     const af::dim4 ostrides = out.strides();
@@ -97,8 +107,8 @@ void medfilt2(Param<T> out, CParam<T> in, dim_t w_len, dim_t w_wid) {
                     for (int wj = 0; wj < (int)w_wid; ++wj) {
                         bool isColOff = false;
 
-                        int im_col = col + wj - w_wid / 2;
-                        int im_coff;
+                        int im_col  = col + wj - w_wid / 2;
+                        int im_coff = 0;
                         switch (Pad) {
                             case AF_PAD_ZERO:
                                 im_coff = im_col * istrides[1];
@@ -118,13 +128,17 @@ void medfilt2(Param<T> out, CParam<T> in, dim_t w_len, dim_t w_wid) {
 
                                 im_coff = im_col * istrides[1];
                             } break;
+                            default:
+                                static_assert(IsValidPadType,
+                                              "Unsupported padding type");
+                                break;
                         }
 
                         for (int wi = 0; wi < (int)w_len; ++wi) {
                             bool isRowOff = false;
 
-                            int im_row = row + wi - w_len / 2;
-                            int im_roff;
+                            int im_row  = row + wi - w_len / 2;
+                            int im_roff = 0;
                             switch (Pad) {
                                 case AF_PAD_ZERO:
                                     im_roff = im_row * istrides[0];
@@ -145,6 +159,10 @@ void medfilt2(Param<T> out, CParam<T> in, dim_t w_len, dim_t w_wid) {
 
                                     im_roff = im_row * istrides[0];
                                 } break;
+                                default:
+                                    static_assert(IsValidPadType,
+                                                  "Unsupported padding type");
+                                    break;
                             }
 
                             if (isRowOff || isColOff) {
@@ -155,6 +173,11 @@ void medfilt2(Param<T> out, CParam<T> in, dim_t w_len, dim_t w_wid) {
                                     case AF_PAD_SYM:
                                         wind_vals.push_back(
                                             in_ptr[im_coff + im_roff]);
+                                        break;
+                                    default:
+                                        static_assert(
+                                            IsValidPadType,
+                                            "Unsupported padding type");
                                         break;
                                 }
                             } else

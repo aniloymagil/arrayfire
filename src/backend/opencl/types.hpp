@@ -8,19 +8,29 @@
  ********************************************************/
 
 #pragma once
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#if __APPLE__
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#endif
-#pragma GCC diagnostic pop
 
-#include <common/traits.hpp>
+#include <cl2hpp.hpp>
 #include <common/kernel_type.hpp>
+#include <common/traits.hpp>
+#include <af/compilers.h>
 
+#include <algorithm>
+#include <array>
 #include <string>
+
+namespace common {
+/// This is a CPU based half which need to be converted into floats before they
+/// are used
+template<>
+struct kernel_type<common::half> {
+    using data = common::half;
+
+    // These are the types within a kernel
+    using native = float;
+
+    using compute = float;
+};
+}  // namespace common
 
 namespace opencl {
 using cdouble = cl_double2;
@@ -46,7 +56,7 @@ struct ToNumStr {
 
 namespace {
 template<typename T>
-inline const char *shortname(bool caps) {
+inline const char *shortname(bool caps = false) {
     return caps ? "X" : "x";
 }
 
@@ -98,11 +108,52 @@ template<>
 inline const char *shortname<ushort>(bool caps) {
     return caps ? "Q" : "q";
 }
-}  // namespace
 
 template<typename T>
-const char *getFullName() {
+inline const char *getFullName() {
     return af::dtype_traits<T>::getName();
+}
+
+template<>
+inline const char *getFullName<cfloat>() {
+    return "float2";
+}
+
+template<>
+inline const char *getFullName<cdouble>() {
+    return "double2";
+}
+}  // namespace
+
+template<typename... ARGS>
+AF_CONSTEXPR const char *getTypeBuildDefinition() {
+    using common::half;
+    using std::any_of;
+    using std::array;
+    using std::begin;
+    using std::end;
+    using std::is_same;
+    array<bool, sizeof...(ARGS)> is_half    = {is_same<ARGS, half>::value...};
+    array<bool, sizeof...(ARGS)> is_double  = {is_same<ARGS, double>::value...};
+    array<bool, sizeof...(ARGS)> is_cdouble = {
+        is_same<ARGS, cdouble>::value...};
+
+    bool half_def =
+        any_of(begin(is_half), end(is_half), [](bool val) { return val; });
+    bool double_def =
+        any_of(begin(is_double), end(is_double), [](bool val) { return val; });
+    bool cdouble_def = any_of(begin(is_cdouble), end(is_cdouble),
+                              [](bool val) { return val; });
+
+    if (half_def && (double_def || cdouble_def)) {
+        return " -D USE_HALF -D USE_DOUBLE";
+    } else if (half_def) {
+        return " -D USE_HALF";
+    } else if (double_def || cdouble_def) {
+        return " -D USE_DOUBLE";
+    } else {
+        return "";
+    }
 }
 
 }  // namespace opencl

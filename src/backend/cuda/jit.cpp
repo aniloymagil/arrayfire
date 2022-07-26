@@ -8,67 +8,46 @@
  ********************************************************/
 
 #include <Array.hpp>
+#include <Kernel.hpp>
 #include <common/dispatch.hpp>
 #include <common/half.hpp>
+#include <common/jit/ModdimNode.hpp>
 #include <common/jit/Node.hpp>
+#include <common/jit/NodeIterator.hpp>
+#include <common/kernel_cache.hpp>
+#include <common/util.hpp>
 #include <copy.hpp>
 #include <debug_cuda.hpp>
 #include <device_manager.hpp>
 #include <err_cuda.hpp>
 #include <kernel_headers/jit_cuh.hpp>
 #include <math.hpp>
-#include <nvrtc/cache.hpp>
 #include <platform.hpp>
 #include <af/dim4.hpp>
 
-#include <cstdio>
-#include <functional>
-#include <map>
+#include <cstdlib>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
+using common::findModule;
+using common::getFuncName;
 using common::half;
 using common::Node;
 using common::Node_ids;
 using common::Node_map_t;
 
-using std::hash;
-using std::map;
 using std::string;
 using std::stringstream;
+using std::to_string;
 using std::vector;
 
 namespace cuda {
 
-static string getFuncName(const vector<Node *> &output_nodes,
-                          const vector<const Node *> &full_nodes,
-                          const vector<Node_ids> &full_ids, bool is_linear) {
-    stringstream funcName;
-    stringstream hashName;
-
-    if (is_linear)
-        funcName << "L_";  // Kernel Linear
-    else
-        funcName << "G_";  // Kernel General
-
-    for (const auto &node : output_nodes) {
-        funcName << node->getNameStr() << "_";
-    }
-
-    for (int i = 0; i < (int)full_nodes.size(); i++) {
-        full_nodes[i]->genKerName(funcName, full_ids[i]);
-    }
-
-    hash<string> hash_fn;
-
-    hashName << "KER";
-    hashName << hash_fn(funcName.str());
-    return hashName.str();
-}
-
-static string getKernelString(const string funcName,
-                              const vector<const Node *> &full_nodes,
+static string getKernelString(const string &funcName,
+                              const vector<Node *> &full_nodes,
                               const vector<Node_ids> &full_ids,
                               const vector<int> &output_ids, bool is_linear) {
     const std::string includeFileStr(jit_cuh, jit_cuh_len);
@@ -148,7 +127,7 @@ struct Param {
     stringstream opsStream;
     stringstream outrefstream;
 
-    for (int i = 0; i < (int)full_nodes.size(); i++) {
+    for (int i = 0; i < static_cast<int>(full_nodes.size()); i++) {
         const auto &node     = full_nodes[i];
         const auto &ids_curr = full_ids[i];
         // Generate input parameters, only needs current id
@@ -162,8 +141,7 @@ struct Param {
     outrefstream << "const Param<" << full_nodes[output_ids[0]]->getTypeStr()
                  << "> &outref = out" << output_ids[0] << ";\n";
 
-    for (int i = 0; i < (int)output_ids.size(); i++) {
-        int id = output_ids[i];
+    for (int id : output_ids) {
         // Generate output parameters
         outParamStream << "Param<" << full_nodes[id]->getTypeStr() << "> out"
                        << id << ", \n";
@@ -202,48 +180,49 @@ struct Param {
 
 static CUfunction getKernel(const vector<Node *> &output_nodes,
                             const vector<int> &output_ids,
-                            const vector<const Node *> &full_nodes,
+                            const vector<Node *> &full_nodes,
                             const vector<Node_ids> &full_ids,
                             const bool is_linear) {
-    typedef map<string, Kernel> kc_t;
-
-    thread_local kc_t kernelCaches[DeviceManager::MAX_DEVICES];
-
-    string funcName =
+    const string funcName =
         getFuncName(output_nodes, full_nodes, full_ids, is_linear);
-    int device = getActiveDeviceId();
+    const size_t moduleKey = deterministicHash(funcName);
 
-    kc_t::iterator idx = kernelCaches[device].find(funcName);
-    Kernel entry{nullptr, nullptr};
+    // A forward lookup in module cache helps avoid recompiling the jit
+    // source generated from identical jit-trees. It also enables us
+    // with a way to save jit kernels to disk only once
+    auto entry = findModule(getActiveDeviceId(), moduleKey);
 
-    if (idx == kernelCaches[device].end()) {
-        string jit_ker = getKernelString(funcName, full_nodes, full_ids,
-                                         output_ids, is_linear);
-        saveKernel(funcName, jit_ker, ".cu");
-        entry = buildKernel(device, funcName, jit_ker, {}, true);
-        kernelCaches[device][funcName] = entry;
-    } else {
-        entry = idx->second;
+    if (entry.get() == nullptr) {
+        const string jitKer = getKernelString(funcName, full_nodes, full_ids,
+                                              output_ids, is_linear);
+        saveKernel(funcName, jitKer, ".cu");
+
+        common::Source jit_src{jitKer.c_str(), jitKer.size(),
+                               deterministicHash(jitKer)};
+
+        return common::getKernel(funcName, {jit_src}, {}, {}, true).get();
     }
-
-    return entry.ker;
+    return common::getKernel(entry, funcName, true).get();
 }
 
 template<typename T>
-void evalNodes(vector<Param<T>> &outputs, vector<Node *> output_nodes) {
-    int num_outputs = (int)outputs.size();
-    int device      = getActiveDeviceId();
+void evalNodes(vector<Param<T>> &outputs, const vector<Node *> &output_nodes) {
+    size_t num_outputs = outputs.size();
+    if (num_outputs == 0) { return; }
 
-    if (num_outputs == 0) return;
+    int device         = getActiveDeviceId();
+    dim_t *outDims     = outputs[0].dims;
+    size_t numOutElems = outDims[0] * outDims[1] * outDims[2] * outDims[3];
+    if (numOutElems == 0) { return; }
 
     // Use thread local to reuse the memory every time you are here.
     thread_local Node_map_t nodes;
-    thread_local vector<const Node *> full_nodes;
+    thread_local vector<Node *> full_nodes;
     thread_local vector<Node_ids> full_ids;
     thread_local vector<int> output_ids;
 
     // Reserve some space to improve performance at smaller sizes
-    if (nodes.size() == 0) {
+    if (nodes.empty()) {
         nodes.reserve(1024);
         output_ids.reserve(output_nodes.size());
         full_nodes.reserve(1024);
@@ -255,8 +234,53 @@ void evalNodes(vector<Param<T>> &outputs, vector<Node *> output_nodes) {
         output_ids.push_back(id);
     }
 
+    using common::ModdimNode;
+    using common::NodeIterator;
+    using jit::BufferNode;
+
+    // find all moddims in the tree
+    vector<std::shared_ptr<Node>> node_clones;
+    for (auto *node : full_nodes) { node_clones.emplace_back(node->clone()); }
+
+    for (common::Node_ids ids : full_ids) {
+        auto &children = node_clones[ids.id]->m_children;
+        for (int i = 0; i < Node::kMaxChildren && children[i] != nullptr; i++) {
+            children[i] = node_clones[ids.child_ids[i]];
+        }
+    }
+
+    for (auto &node : node_clones) {
+        if (node->getOp() == af_moddims_t) {
+            ModdimNode *mn = static_cast<ModdimNode *>(node.get());
+            auto isBuffer  = [](const Node &ptr) { return ptr.isBuffer(); };
+
+            NodeIterator<> it(node.get());
+            auto new_strides = calcStrides(mn->m_new_shape);
+            while (it != NodeIterator<>()) {
+                it = find_if(it, NodeIterator<>(), isBuffer);
+                if (it == NodeIterator<>()) { break; }
+
+                BufferNode<T> *buf = static_cast<BufferNode<T> *>(&(*it));
+
+                buf->m_param.dims[0]    = mn->m_new_shape[0];
+                buf->m_param.dims[1]    = mn->m_new_shape[1];
+                buf->m_param.dims[2]    = mn->m_new_shape[2];
+                buf->m_param.dims[3]    = mn->m_new_shape[3];
+                buf->m_param.strides[0] = new_strides[0];
+                buf->m_param.strides[1] = new_strides[1];
+                buf->m_param.strides[2] = new_strides[2];
+                buf->m_param.strides[3] = new_strides[3];
+
+                ++it;
+            }
+        }
+    }
+
+    full_nodes.clear();
+    for (auto &node : node_clones) { full_nodes.push_back(node.get()); }
+
     bool is_linear = true;
-    for (auto node : full_nodes) {
+    for (auto *node : full_nodes) {
         is_linear &= node->isLinear(outputs[0].dims);
     }
 
@@ -273,19 +297,19 @@ void evalNodes(vector<Param<T>> &outputs, vector<Node *> output_nodes) {
 
     int num_odims = 4;
     while (num_odims >= 1) {
-        if (outputs[0].dims[num_odims - 1] == 1)
+        if (outDims[num_odims - 1] == 1) {
             num_odims--;
-        else
+        } else {
             break;
+        }
     }
 
     if (is_linear) {
         threads_x = 256;
         threads_y = 1;
 
-        blocks_x_total = divup((outputs[0].dims[0] * outputs[0].dims[1] *
-                                outputs[0].dims[2] * outputs[0].dims[3]),
-                               threads_x);
+        blocks_x_total = divup(
+            (outDims[0] * outDims[1] * outDims[2] * outDims[3]), threads_x);
 
         int repeat_x = divup(blocks_x_total, max_blocks_x);
         blocks_x     = divup(blocks_x_total, repeat_x);
@@ -293,11 +317,11 @@ void evalNodes(vector<Param<T>> &outputs, vector<Node *> output_nodes) {
         threads_x = 32;
         threads_y = 8;
 
-        blocks_x_ = divup(outputs[0].dims[0], threads_x);
-        blocks_y_ = divup(outputs[0].dims[1], threads_y);
+        blocks_x_ = divup(outDims[0], threads_x);
+        blocks_y_ = divup(outDims[1], threads_y);
 
-        blocks_x = blocks_x_ * outputs[0].dims[2];
-        blocks_y = blocks_y_ * outputs[0].dims[3];
+        blocks_x = blocks_x_ * outDims[2];
+        blocks_y = blocks_y_ * outDims[3];
 
         blocks_z = divup(blocks_y, max_blocks_y);
         blocks_y = divup(blocks_y, blocks_z);
@@ -316,15 +340,21 @@ void evalNodes(vector<Param<T>> &outputs, vector<Node *> output_nodes) {
                       });
     }
 
-    for (int i = 0; i < num_outputs; i++) {
-        args.push_back((void *)&outputs[i]);
+    for (size_t i = 0; i < num_outputs; i++) {
+        args.push_back(static_cast<void *>(&outputs[i]));
     }
 
-    args.push_back((void *)&blocks_x_);
-    args.push_back((void *)&blocks_y_);
-    args.push_back((void *)&blocks_x_total);
-    args.push_back((void *)&num_odims);
+    args.push_back(static_cast<void *>(&blocks_x_));
+    args.push_back(static_cast<void *>(&blocks_y_));
+    args.push_back(static_cast<void *>(&blocks_x_total));
+    args.push_back(static_cast<void *>(&num_odims));
 
+    {
+        using namespace cuda::kernel_logger;
+        AF_TRACE("Launching : Blocks: [{}] Threads: [{}] ",
+                 dim3(blocks_x, blocks_y, blocks_z),
+                 dim3(threads_x, threads_y));
+    }
     CU_CHECK(cuLaunchKernel(ker, blocks_x, blocks_y, blocks_z, threads_x,
                             threads_y, 1, 0, getActiveStream(), args.data(),
                             NULL));
@@ -344,7 +374,6 @@ void evalNodes(Param<T> out, Node *node) {
     outputs.push_back(out);
     output_nodes.push_back(node);
     evalNodes(outputs, output_nodes);
-    return;
 }
 
 template void evalNodes<float>(Param<float> out, Node *node);
@@ -361,21 +390,30 @@ template void evalNodes<short>(Param<short> out, Node *node);
 template void evalNodes<ushort>(Param<ushort> out, Node *node);
 template void evalNodes<half>(Param<half> out, Node *node);
 
-template void evalNodes<float>(vector<Param<float>> &out, vector<Node *> node);
+template void evalNodes<float>(vector<Param<float>> &out,
+                               const vector<Node *> &node);
 template void evalNodes<double>(vector<Param<double>> &out,
-                                vector<Node *> node);
+                                const vector<Node *> &node);
 template void evalNodes<cfloat>(vector<Param<cfloat>> &out,
-                                vector<Node *> node);
+                                const vector<Node *> &node);
 template void evalNodes<cdouble>(vector<Param<cdouble>> &out,
-                                 vector<Node *> node);
-template void evalNodes<int>(vector<Param<int>> &out, vector<Node *> node);
-template void evalNodes<uint>(vector<Param<uint>> &out, vector<Node *> node);
-template void evalNodes<char>(vector<Param<char>> &out, vector<Node *> node);
-template void evalNodes<uchar>(vector<Param<uchar>> &out, vector<Node *> node);
-template void evalNodes<intl>(vector<Param<intl>> &out, vector<Node *> node);
-template void evalNodes<uintl>(vector<Param<uintl>> &out, vector<Node *> node);
-template void evalNodes<short>(vector<Param<short>> &out, vector<Node *> node);
+                                 const vector<Node *> &node);
+template void evalNodes<int>(vector<Param<int>> &out,
+                             const vector<Node *> &node);
+template void evalNodes<uint>(vector<Param<uint>> &out,
+                              const vector<Node *> &node);
+template void evalNodes<char>(vector<Param<char>> &out,
+                              const vector<Node *> &node);
+template void evalNodes<uchar>(vector<Param<uchar>> &out,
+                               const vector<Node *> &node);
+template void evalNodes<intl>(vector<Param<intl>> &out,
+                              const vector<Node *> &node);
+template void evalNodes<uintl>(vector<Param<uintl>> &out,
+                               const vector<Node *> &node);
+template void evalNodes<short>(vector<Param<short>> &out,
+                               const vector<Node *> &node);
 template void evalNodes<ushort>(vector<Param<ushort>> &out,
-                                vector<Node *> node);
-template void evalNodes<half>(vector<Param<half>> &out, vector<Node *> node);
+                                const vector<Node *> &node);
+template void evalNodes<half>(vector<Param<half>> &out,
+                              const vector<Node *> &node);
 }  // namespace cuda

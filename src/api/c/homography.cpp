@@ -17,8 +17,12 @@
 #include <af/random.h>
 #include <af/vision.h>
 
+#include <utility>
+
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::createEmptyArray;
+using std::swap;
 
 template<typename T>
 static inline void homography(af_array& H, int& inliers, const af_array x_src,
@@ -74,6 +78,8 @@ af_err af_homography(af_array* H, int* inliers, const af_array x_src,
 
         ARG_ASSERT(5, (inlier_thr >= 0.1f));
         ARG_ASSERT(6, (iterations > 0));
+        ARG_ASSERT(
+            7, (htype == AF_HOMOGRAPHY_RANSAC || htype == AF_HOMOGRAPHY_LMEDS));
 
         af_array outH;
         int outInl;
@@ -89,8 +95,8 @@ af_err af_homography(af_array* H, int* inliers, const af_array x_src,
                 break;
             default: TYPE_ERROR(1, otype);
         }
-        std::swap(*H, outH);
-        std::swap(*inliers, outInl);
+        swap(*H, outH);
+        swap(*inliers, outInl);
     }
     CATCHALL;
 

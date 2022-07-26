@@ -11,43 +11,47 @@
 #include <windows.h>
 #endif
 
+#ifdef WITH_CUDNN
+#include <cudnn.hpp>
+#include <cudnnModule.hpp>
+#endif
+
 #include <GraphicsResourceManager.hpp>
+#include <common/DefaultMemoryManager.hpp>
 #include <common/Logger.hpp>
 #include <common/defines.hpp>
+#include <common/err_common.hpp>
+#include <common/graphics_common.hpp>
 #include <common/host_memory.hpp>
 #include <common/unique_handle.hpp>
 #include <common/util.hpp>
 #include <cublas.hpp>
-#include <cudnn.hpp>
 #include <cufft.hpp>
 #include <cusolverDn.hpp>
 #include <cusparse.hpp>
+#include <cusparseModule.hpp>
 #include <device_manager.hpp>
 #include <driver.h>
 #include <err_cuda.hpp>
 #include <memory.hpp>
 #include <spdlog/spdlog.h>
+#include <utility.hpp>
 #include <version.hpp>
 #include <af/cuda.h>
 #include <af/device.h>
 #include <af/version.h>
-// cuda_gl_interop.h does not include OpenGL headers for ARM
-#include <common/graphics_common.hpp>
-#define __gl_h_  // FIXME Hack to avoid gl.h inclusion by cuda_gl_interop.h
-#include <cuda_gl_interop.h>
 
-#include <algorithm>
 #include <array>
-#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <vector>
 
 using std::call_once;
+using std::make_unique;
 using std::once_flag;
 using std::ostringstream;
 using std::runtime_error;
@@ -56,11 +60,14 @@ using std::to_string;
 using std::unique_ptr;
 
 using common::unique_handle;
+using common::memory::MemoryManagerBase;
+using cuda::Allocator;
+using cuda::AllocatorPinned;
 
 namespace cuda {
 
-static const std::string get_system(void) {
-    std::string arch = (sizeof(void *) == 4) ? "32-bit " : "64-bit ";
+static string get_system() {
+    string arch = (sizeof(void *) == 4) ? "32-bit " : "64-bit ";
 
     return arch +
 #if defined(OS_LNX)
@@ -72,24 +79,13 @@ static const std::string get_system(void) {
 #endif
 }
 
-static inline int getMinSupportedCompute(int cudaMajorVer) {
-    // Vector of minimum supported compute versions
-    // for CUDA toolkit (i+1).* where i is the index
-    // of the vector
-    static const std::array<int, 10> minSV{{1, 1, 1, 1, 1, 1, 2, 2, 3, 3}};
-
-    int CVSize = static_cast<int>(minSV.size());
-    return (cudaMajorVer > CVSize ? minSV[CVSize - 1]
-                                  : minSV[cudaMajorVer - 1]);
-}
-
 unique_handle<cublasHandle_t> *cublasManager(const int deviceId) {
     thread_local unique_handle<cublasHandle_t>
         handles[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
 
     call_once(initFlags[deviceId], [&] {
-        handles[deviceId].create();
+        CUBLAS_CHECK((cublasStatus_t)handles[deviceId].create());
         // TODO(pradeep) When multiple streams per device
         // is added to CUDA backend, move the cublasSetStream
         // call outside of call_once scope.
@@ -100,25 +96,40 @@ unique_handle<cublasHandle_t> *cublasManager(const int deviceId) {
     return &handles[deviceId];
 }
 
+#ifdef WITH_CUDNN
 unique_handle<cudnnHandle_t> *nnManager(const int deviceId) {
     thread_local unique_handle<cudnnHandle_t>
         cudnnHandles[DeviceManager::MAX_DEVICES];
-    thread_local std::once_flag initFlags[DeviceManager::MAX_DEVICES];
+    thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
 
-    std::call_once(initFlags[deviceId],
-                   [&] { cudnnHandles[deviceId].create(); });
+    auto *handle        = &cudnnHandles[deviceId];
+    cudnnStatus_t error = CUDNN_STATUS_SUCCESS;
+    call_once(initFlags[deviceId], [handle, &error] {
+        auto getLogger = [&] { return spdlog::get("platform"); };
+        AF_TRACE("Initializing cuDNN");
+        error = static_cast<cudnnStatus_t>(handle->create());
 
-    CUDNN_CHECK(
-        cudnnSetStream(cudnnHandles[deviceId], cuda::getStream(deviceId)));
+        // Not throwing an AF_ERROR here because we are in a lambda that could
+        // be executing on another thread;
+        if (!(*handle)) { getLogger()->error("Error initalizing cuDNN"); }
+    });
+    if (error) {
+        string error_msg = fmt::format("Error initializing cuDNN({}): {}.",
+                                       error, errorString(error));
+        AF_ERROR(error_msg, AF_ERR_RUNTIME);
+    }
+    CUDNN_CHECK(getCudnnPlugin().cudnnSetStream(cudnnHandles[deviceId],
+                                                cuda::getStream(deviceId)));
 
-    return &cudnnHandles[deviceId];
+    return handle;
 }
+#endif
 
 unique_ptr<PlanCache> &cufftManager(const int deviceId) {
     thread_local unique_ptr<PlanCache> caches[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
     call_once(initFlags[deviceId],
-              [&] { caches[deviceId].reset(new PlanCache()); });
+              [&] { caches[deviceId] = make_unique<PlanCache>(); });
     return caches[deviceId];
 }
 
@@ -149,38 +160,54 @@ unique_handle<cusparseHandle_t> *cusparseManager(const int deviceId) {
         handles[DeviceManager::MAX_DEVICES];
     thread_local once_flag initFlags[DeviceManager::MAX_DEVICES];
     call_once(initFlags[deviceId], [&] {
+        auto &_ = getCusparsePlugin();
         handles[deviceId].create();
         // TODO(pradeep) When multiple streams per device
         // is added to CUDA backend, move the cublasSetStream
         // call outside of call_once scope.
         CUSPARSE_CHECK(
-            cusparseSetStream(handles[deviceId], cuda::getStream(deviceId)));
+            _.cusparseSetStream(handles[deviceId], cuda::getStream(deviceId)));
     });
     return &handles[deviceId];
 }
 
 DeviceManager::~DeviceManager() {
-    // Reset unique_ptrs for all cu[BLAS | Sparse | Solver]
-    // handles of all devices
-    for (int i = 0; i < nDevices; ++i) {
-        setDevice(i);
-        delete cusolverManager(i);
-        delete cusparseManager(i);
-        cufftManager(i).reset();
-        delete cublasManager(i);
-        delete nnManager(i);
+    try {
+        // Reset unique_ptrs for all cu[BLAS | Sparse | Solver]
+        // handles of all devices
+        for (int i = 0; i < nDevices; ++i) {
+            setDevice(i);
+            cusolverManager(i)->reset();
+            cusparseManager(i)->reset();
+            cufftManager(i).reset();
+            cublasManager(i)->reset();
+#ifdef WITH_CUDNN
+            nnManager(i)->reset();
+#endif
+        }
+    } catch (const AfError &err) {
+        AF_TRACE(
+            "Exception thrown during destruction of DeviceManager(ignoring). "
+            "{}({}):{} "
+            "{}",
+            err.getFileName(), err.getLine(), err.getFunctionName(),
+            err.what());
+    } catch (...) {
+        AF_TRACE(
+            "Unknown exception thrown during destruction of "
+            "DeviceManager(ignoring)");
     }
 }
 
 int getBackend() { return AF_BACKEND_CUDA; }
 
-string getDeviceInfo(int device) {
+string getDeviceInfo(int device) noexcept {
     cudaDeviceProp dev = getDeviceProp(device);
 
     size_t mem_gpu_total = dev.totalGlobalMem;
     // double cc = double(dev.major) + double(dev.minor) / 10;
 
-    bool show_braces = getActiveDeviceId() == device;
+    bool show_braces = getActiveDeviceId() == static_cast<unsigned>(device);
 
     string id = (show_braces ? string("[") : "-") + to_string(device) +
                 (show_braces ? string("]") : "-");
@@ -196,19 +223,19 @@ string getDeviceInfo(int device) {
     return info;
 }
 
-string getDeviceInfo() {
+string getDeviceInfo() noexcept {
     ostringstream info;
     info << "ArrayFire v" << AF_VERSION << " (CUDA, " << get_system()
-         << ", build " << AF_REVISION << ")" << std::endl;
+         << ", build " << AF_REVISION << ")\n";
     info << getPlatformInfo();
     for (int i = 0; i < getDeviceCount(); ++i) { info << getDeviceInfo(i); }
     return info.str();
 }
 
-string getPlatformInfo() {
-    string driverVersion    = getDriverVersion();
-    std::string cudaRuntime = getCUDARuntimeVersion();
-    string platform         = "Platform: CUDA Toolkit " + cudaRuntime;
+string getPlatformInfo() noexcept {
+    string driverVersion = getDriverVersion();
+    string cudaRuntime   = getCUDARuntimeVersion();
+    string platform      = "Platform: CUDA Runtime " + cudaRuntime;
     if (!driverVersion.empty()) {
         platform.append(", Driver: ");
         platform.append(driverVersion);
@@ -223,9 +250,17 @@ bool isDoubleSupported(int device) {
 }
 
 bool isHalfSupported(int device) {
-    auto prop     = getDeviceProp(device);
-    float compute = prop.major * 1000 + prop.minor * 10;
-    return compute >= 5030;
+    std::array<bool, DeviceManager::MAX_DEVICES> half_supported = []() {
+        std::array<bool, DeviceManager::MAX_DEVICES> out{};
+        int count = getDeviceCount();
+        for (int i = 0; i < count; i++) {
+            auto prop   = getDeviceProp(i);
+            int compute = prop.major * 1000 + prop.minor * 10;
+            out[i]      = compute >= 5030;
+        }
+        return out;
+    }();
+    return half_supported[device];
 }
 
 void devprop(char *d_name, char *d_platform, char *d_toolkit, char *d_compute) {
@@ -237,7 +272,7 @@ void devprop(char *d_name, char *d_platform, char *d_toolkit, char *d_compute) {
     snprintf(d_name, 256, "%s", dev.name);
 
     // Platform
-    std::string cudaRuntime = getCUDARuntimeVersion();
+    string cudaRuntime = getCUDARuntimeVersion();
     snprintf(d_platform, 10, "CUDA");
     snprintf(d_toolkit, 64, "v%s", cudaRuntime.c_str());
 
@@ -247,52 +282,49 @@ void devprop(char *d_name, char *d_platform, char *d_toolkit, char *d_compute) {
     // Sanitize input
     for (int i = 0; i < 256; i++) {
         if (d_name[i] == ' ') {
-            if (d_name[i + 1] == 0 || d_name[i + 1] == ' ')
+            if (d_name[i + 1] == 0 || d_name[i + 1] == ' ') {
                 d_name[i] = 0;
-            else
+            } else {
                 d_name[i] = '_';
+            }
         }
     }
 }
 
-string getDriverVersion() {
-    char driverVersion[1024] = {
-        " ",
-    };
+string getDriverVersion() noexcept {
+    char driverVersion[1024] = {" "};
     int x = nvDriverVersion(driverVersion, sizeof(driverVersion));
     if (x != 1) {
 // Windows, OSX, Tegra Need a new way to fetch driver
 #if !defined(OS_WIN) && !defined(OS_MAC) && !defined(__arm__) && \
     !defined(__aarch64__)
-        throw runtime_error("Invalid driver");
+        return "N/A";
 #endif
         int driver = 0;
-        CUDA_CHECK(cudaDriverGetVersion(&driver));
+        if (cudaDriverGetVersion(&driver)) { return "N/A"; }
         return to_string(driver);
     } else {
         return string(driverVersion);
     }
 }
 
-string int_version_to_string(int version) {
-    return to_string(version / 1000) + "." +
-           to_string((int)((version % 1000) / 10.));
-}
-
-string getCUDARuntimeVersion() {
+string getCUDARuntimeVersion() noexcept {
     int runtime = 0;
-    CUDA_CHECK(cudaRuntimeGetVersion(&runtime));
-    return int_version_to_string(runtime);
+    if (cudaSuccess == cudaRuntimeGetVersion(&runtime)) {
+        return int_version_to_string(runtime);
+    } else {
+        return int_version_to_string(CUDA_VERSION);
+    }
 }
 
-unsigned getMaxJitSize() {
-    const int MAX_JIT_LEN = 100;
-
-    thread_local int length = 0;
-    if (length == 0) {
-        std::string env_var = getEnvVar("AF_CUDA_MAX_JIT_LEN");
+int &getMaxJitSize() {
+    constexpr int MAX_JIT_LEN = 100;
+    thread_local int length   = 0;
+    if (length <= 0) {
+        string env_var = getEnvVar("AF_CUDA_MAX_JIT_LEN");
         if (!env_var.empty()) {
-            length = std::stoi(env_var);
+            int input_len = stoi(env_var);
+            length        = input_len > 0 ? input_len : MAX_JIT_LEN;
         } else {
             length = MAX_JIT_LEN;
         }
@@ -307,13 +339,28 @@ int &tlocalActiveDeviceId() {
     return activeDeviceId;
 }
 
-int getDeviceCount() { return DeviceManager::getInstance().nDevices; }
+int getDeviceCount() {
+    int count = 0;
+    if (cudaGetDeviceCount(&count)) {
+        return 0;
+    } else {
+        return count;
+    }
+}
 
-int getActiveDeviceId() { return tlocalActiveDeviceId(); }
+void init() {
+    thread_local auto err =
+        cudaSetDevice(getDeviceNativeId(getActiveDeviceId()));
+    UNUSED(err);
+}
+
+unsigned getActiveDeviceId() { return tlocalActiveDeviceId(); }
 
 int getDeviceNativeId(int device) {
-    if (device < (int)DeviceManager::getInstance().cuDevices.size())
+    if (device <
+        static_cast<int>(DeviceManager::getInstance().cuDevices.size())) {
         return DeviceManager::getInstance().cuDevices[device].nativeId;
+    }
     return -1;
 }
 
@@ -322,15 +369,15 @@ int getDeviceIdFromNativeId(int nativeId) {
 
     int devId = 0;
     for (devId = 0; devId < mngr.nDevices; ++devId) {
-        if (nativeId == mngr.cuDevices[devId].nativeId) break;
+        if (nativeId == mngr.cuDevices[devId].nativeId) { break; }
     }
     return devId;
 }
 
 cudaStream_t getStream(int device) {
-    static std::once_flag streamInitFlags[DeviceManager::MAX_DEVICES];
+    static once_flag streamInitFlags[DeviceManager::MAX_DEVICES];
 
-    std::call_once(streamInitFlags[device], [device]() {
+    call_once(streamInitFlags[device], [device]() {
         DeviceManager &inst = DeviceManager::getInstance();
         CUDA_CHECK(cudaStreamCreate(&(inst.streams[device])));
     });
@@ -351,31 +398,64 @@ int setDevice(int device) {
 }
 
 cudaDeviceProp getDeviceProp(int device) {
-    if (device < (int)DeviceManager::getInstance().cuDevices.size())
+    if (device <
+        static_cast<int>(DeviceManager::getInstance().cuDevices.size())) {
         return DeviceManager::getInstance().cuDevices[device].prop;
+    }
     return DeviceManager::getInstance().cuDevices[0].prop;
 }
 
-MemoryManager &memoryManager() {
-    static std::once_flag flag;
+MemoryManagerBase &memoryManager() {
+    static once_flag flag;
 
     DeviceManager &inst = DeviceManager::getInstance();
 
-    std::call_once(flag, [&]() { inst.memManager.reset(new MemoryManager()); });
+    call_once(flag, [&]() {
+        // By default, create an instance of the default memory manager
+        inst.memManager = make_unique<common::DefaultMemoryManager>(
+            getDeviceCount(), common::MAX_BUFFERS,
+            AF_MEM_DEBUG || AF_CUDA_MEM_DEBUG);
+        // Set the memory manager's device memory manager
+        unique_ptr<Allocator> deviceMemoryManager(new Allocator());
+        inst.memManager->setAllocator(move(deviceMemoryManager));
+        inst.memManager->initialize();
+    });
 
     return *(inst.memManager.get());
 }
 
-MemoryManagerPinned &pinnedMemoryManager() {
-    static std::once_flag flag;
+MemoryManagerBase &pinnedMemoryManager() {
+    static once_flag flag;
 
     DeviceManager &inst = DeviceManager::getInstance();
 
-    std::call_once(flag, [&]() {
-        inst.pinnedMemManager.reset(new MemoryManagerPinned());
+    call_once(flag, [&]() {
+        // By default, create an instance of the default memory manager
+        inst.pinnedMemManager = make_unique<common::DefaultMemoryManager>(
+            1, common::MAX_BUFFERS, AF_MEM_DEBUG || AF_CUDA_MEM_DEBUG);
+        // Set the memory manager's device memory manager
+        unique_ptr<AllocatorPinned> deviceMemoryManager(new AllocatorPinned());
+        inst.pinnedMemManager->setAllocator(move(deviceMemoryManager));
+        inst.pinnedMemManager->initialize();
     });
 
     return *(inst.pinnedMemManager.get());
+}
+
+void setMemoryManager(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManager(move(mgr));
+}
+
+void resetMemoryManager() {
+    return DeviceManager::getInstance().resetMemoryManager();
+}
+
+void setMemoryManagerPinned(unique_ptr<MemoryManagerBase> mgr) {
+    return DeviceManager::getInstance().setMemoryManagerPinned(move(mgr));
+}
+
+void resetMemoryManagerPinned() {
+    return DeviceManager::getInstance().resetMemoryManagerPinned();
 }
 
 graphics::ForgeManager &forgeManager() {
@@ -383,14 +463,14 @@ graphics::ForgeManager &forgeManager() {
 }
 
 GraphicsResourceManager &interopManager() {
-    static std::once_flag initFlags[DeviceManager::MAX_DEVICES];
+    static once_flag initFlags[DeviceManager::MAX_DEVICES];
 
     int id = getActiveDeviceId();
 
     DeviceManager &inst = DeviceManager::getInstance();
 
-    std::call_once(initFlags[id], [&] {
-        inst.gfxManagers[id].reset(new GraphicsResourceManager());
+    call_once(initFlags[id], [&] {
+        inst.gfxManagers[id] = make_unique<GraphicsResourceManager>();
     });
 
     return *(inst.gfxManagers[id].get());
@@ -402,7 +482,23 @@ PlanCache &fftManager() {
 
 BlasHandle blasHandle() { return *cublasManager(cuda::getActiveDeviceId()); }
 
-cudnnHandle_t nnHandle() { return *nnManager(cuda::getActiveDeviceId()); }
+#ifdef WITH_CUDNN
+cudnnHandle_t nnHandle() {
+    // Keep the getCudnnPlugin call here because module loading can throw an
+    // exception the first time its called. We want to avoid that because
+    // the unique handle object is marked noexcept and could terminate. if
+    // the module is not loaded correctly
+    static cudnnModule keep_me_to_avoid_exceptions_exceptions =
+        getCudnnPlugin();
+    static unique_handle<cudnnHandle_t> *handle =
+        nnManager(cuda::getActiveDeviceId());
+    if (*handle) {
+        return *handle;
+    } else {
+        AF_ERROR("Error Initializing cuDNN\n", AF_ERR_RUNTIME);
+    }
+}
+#endif
 
 SolveHandle solverDnHandle() {
     return *cusolverManager(cuda::getActiveDeviceId());
@@ -468,6 +564,6 @@ template<>
 __half *array::device<__half>() const {
     void *ptr = NULL;
     af_get_device_ptr(&ptr, get());
-    return (__half *)ptr;
+    return static_cast<__half *>(ptr);
 }
 }  // namespace af

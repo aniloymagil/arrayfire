@@ -12,9 +12,16 @@
 #include <platform.hpp>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
+
+using common::memory::MemoryManagerBase;
+
+#ifndef AF_CUDA_MEM_DEBUG
+#define AF_CUDA_MEM_DEBUG 0
+#endif
 
 namespace cuda {
 
@@ -26,9 +33,11 @@ struct cudaDevice_t {
 
 int& tlocalActiveDeviceId();
 
+bool checkDeviceWithRuntime(int runtime, std::pair<int, int> compute);
+
 class DeviceManager {
    public:
-    static const size_t MAX_DEVICES = 16;
+    static const int MAX_DEVICES = 16;
 
     static bool checkGraphicsInteropCapability();
 
@@ -37,23 +46,39 @@ class DeviceManager {
 
     spdlog::logger* getLogger();
 
-    friend MemoryManager& memoryManager();
+    friend MemoryManagerBase& memoryManager();
 
-    friend MemoryManagerPinned& pinnedMemoryManager();
+    friend void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void setMemoryManager(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManager();
+
+    void resetMemoryManager();
+
+    friend MemoryManagerBase& pinnedMemoryManager();
+
+    friend void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    void setMemoryManagerPinned(std::unique_ptr<MemoryManagerBase> mgr);
+
+    friend void resetMemoryManagerPinned();
+
+    void resetMemoryManagerPinned();
 
     friend graphics::ForgeManager& forgeManager();
 
     friend GraphicsResourceManager& interopManager();
 
-    friend std::string getDeviceInfo(int device);
+    friend std::string getDeviceInfo(int device) noexcept;
 
-    friend std::string getPlatformInfo();
+    friend std::string getPlatformInfo() noexcept;
 
-    friend std::string getDriverVersion();
+    friend std::string getDriverVersion() noexcept;
 
-    friend std::string getCUDARuntimeVersion();
+    friend std::string getCUDARuntimeVersion() noexcept;
 
-    friend std::string getDeviceInfo();
+    friend std::string getDeviceInfo() noexcept;
 
     friend int getDeviceCount();
 
@@ -82,10 +107,12 @@ class DeviceManager {
     // Attributes
     enum sort_mode { flops = 0, memory = 1, compute = 2, none = 3 };
 
+    // Checks if the Graphics driver is capable of running the CUDA toolkit
+    // version that ArrayFire was compiled against
     void checkCudaVsDriverVersion();
     void sortDevices(sort_mode mode = flops);
 
-    int setActiveDevice(int device, int native = -1);
+    int setActiveDevice(int device, int nId = -1);
 
     std::shared_ptr<spdlog::logger> logger;
 
@@ -93,15 +120,17 @@ class DeviceManager {
     std::vector<std::pair<int, int>> devJitComputes;
 
     int nDevices;
-    cudaStream_t streams[MAX_DEVICES];
+    cudaStream_t streams[MAX_DEVICES]{};
 
     std::unique_ptr<graphics::ForgeManager> fgMngr;
 
-    std::unique_ptr<MemoryManager> memManager;
+    std::unique_ptr<MemoryManagerBase> memManager;
 
-    std::unique_ptr<MemoryManagerPinned> pinnedMemManager;
+    std::unique_ptr<MemoryManagerBase> pinnedMemManager;
 
     std::unique_ptr<GraphicsResourceManager> gfxManagers[MAX_DEVICES];
+
+    std::mutex mutex;
 };
 
 }  // namespace cuda

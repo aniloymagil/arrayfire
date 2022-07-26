@@ -9,10 +9,10 @@
 
 #include <kernel/sort_by_key_impl.hpp>
 
-// SBK_TYPES:float double int uint intl uintl short ushort char uchar
+// SBK_TYPES:float double int uint intl uintl short ushort char uchar half
 
 namespace opencl {
 namespace kernel {
 INSTANTIATE1(TYPE)
-}
+}  // namespace kernel
 }  // namespace opencl

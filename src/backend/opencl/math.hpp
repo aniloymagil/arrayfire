@@ -10,6 +10,7 @@
 #pragma once
 
 #include <common/defines.hpp>
+#include <common/half.hpp>
 #include <af/defines.h>
 
 #include <backend.hpp>
@@ -121,13 +122,24 @@ template<>
 STATIC_ double maxval() {
     return std::numeric_limits<double>::infinity();
 }
+
+template<>
+STATIC_ common::half maxval() {
+    return std::numeric_limits<common::half>::infinity();
+}
+
 template<>
 STATIC_ float minval() {
     return -std::numeric_limits<float>::infinity();
 }
+
 template<>
 STATIC_ double minval() {
     return -std::numeric_limits<double>::infinity();
+}
+template<>
+STATIC_ common::half minval() {
+    return -std::numeric_limits<common::half>::infinity();
 }
 
 static inline double real(cdouble in) { return in.s[0]; }
@@ -135,18 +147,29 @@ static inline float real(cfloat in) { return in.s[0]; }
 static inline double imag(cdouble in) { return in.s[1]; }
 static inline float imag(cfloat in) { return in.s[1]; }
 
-bool operator==(cfloat a, cfloat b);
-bool operator!=(cfloat a, cfloat b);
-bool operator==(cdouble a, cdouble b);
-bool operator!=(cdouble a, cdouble b);
-cfloat operator+(cfloat a, cfloat b);
-cfloat operator+(cfloat a);
-cdouble operator+(cdouble a, cdouble b);
-cdouble operator+(cdouble a);
-cfloat operator*(cfloat a, cfloat b);
-cdouble operator*(cdouble a, cdouble b);
+cfloat operator+(cfloat lhs, cfloat rhs);
+cfloat operator+(cfloat lhs);
+cdouble operator+(cdouble lhs, cdouble rhs);
+cdouble operator+(cdouble lhs);
+cfloat operator*(cfloat lhs, cfloat rhs);
+cdouble operator*(cdouble lhs, cdouble rhs);
 common::half operator+(common::half lhs, common::half rhs) noexcept;
 }  // namespace opencl
+
+static inline bool operator==(opencl::cfloat lhs, opencl::cfloat rhs) noexcept {
+    return (lhs.s[0] == rhs.s[0]) && (lhs.s[1] == rhs.s[1]);
+}
+static inline bool operator!=(opencl::cfloat lhs, opencl::cfloat rhs) noexcept {
+    return !(lhs == rhs);
+}
+static inline bool operator==(opencl::cdouble lhs,
+                              opencl::cdouble rhs) noexcept {
+    return (lhs.s[0] == rhs.s[0]) && (lhs.s[1] == rhs.s[1]);
+}
+static inline bool operator!=(opencl::cdouble lhs,
+                              opencl::cdouble rhs) noexcept {
+    return !(lhs == rhs);
+}
 
 #if defined(__GNUC__) || defined(__GNUG__)
 /* GCC/G++, Clang/LLVM, Intel ICC */

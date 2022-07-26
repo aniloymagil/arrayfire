@@ -9,8 +9,9 @@
 
 #include <arith.hpp>
 #include <backend.hpp>
-#include <cast.hpp>
+#include <common/cast.hpp>
 #include <common/err_common.hpp>
+#include <copy.hpp>
 #include <handle.hpp>
 #include <math.hpp>
 #include <reduce.hpp>
@@ -22,39 +23,48 @@
 
 #include <cmath>
 
+using af::dim4;
+using common::cast;
 using detail::arithOp;
+using detail::Array;
+using detail::getScalar;
 using detail::intl;
 using detail::reduce_all;
+using detail::uchar;
+using detail::uint;
 using detail::uintl;
+using detail::ushort;
 
 template<typename Ti, typename To>
 static To corrcoef(const af_array& X, const af_array& Y) {
     Array<To> xIn = cast<To>(getArray<Ti>(X));
     Array<To> yIn = cast<To>(getArray<Ti>(Y));
 
-    dim4 dims = xIn.dims();
-    dim_t n   = xIn.elements();
+    const dim4& dims = xIn.dims();
+    dim_t n          = xIn.elements();
 
-    To xSum = detail::reduce_all<af_add_t, To, To>(xIn);
-    To ySum = detail::reduce_all<af_add_t, To, To>(yIn);
+    To xSum = getScalar<To>(reduce_all<af_add_t, To, To>(xIn));
+    To ySum = getScalar<To>(reduce_all<af_add_t, To, To>(yIn));
 
-    Array<To> xSq = detail::arithOp<To, af_mul_t>(xIn, xIn, dims);
-    Array<To> ySq = detail::arithOp<To, af_mul_t>(yIn, yIn, dims);
-    Array<To> xy  = detail::arithOp<To, af_mul_t>(xIn, yIn, dims);
+    Array<To> xSq = arithOp<To, af_mul_t>(xIn, xIn, dims);
+    Array<To> ySq = arithOp<To, af_mul_t>(yIn, yIn, dims);
+    Array<To> xy  = arithOp<To, af_mul_t>(xIn, yIn, dims);
 
-    To xSqSum = detail::reduce_all<af_add_t, To, To>(xSq);
-    To ySqSum = detail::reduce_all<af_add_t, To, To>(ySq);
-    To xySum  = detail::reduce_all<af_add_t, To, To>(xy);
+    To xSqSum = getScalar<To>(reduce_all<af_add_t, To, To>(xSq));
+    To ySqSum = getScalar<To>(reduce_all<af_add_t, To, To>(ySq));
+    To xySum  = getScalar<To>(reduce_all<af_add_t, To, To>(xy));
 
-    To result = (n * xySum - xSum * ySum) / (sqrt(n * xSqSum - xSum * xSum) *
-                                             sqrt(n * ySqSum - ySum * ySum));
+    To result =
+        (n * xySum - xSum * ySum) / (std::sqrt(n * xSqSum - xSum * xSum) *
+                                     std::sqrt(n * ySqSum - ySum * ySum));
 
     return result;
 }
 
+// NOLINTNEXTLINE
 af_err af_corrcoef(double* realVal, double* imagVal, const af_array X,
                    const af_array Y) {
-    UNUSED(imagVal);  // TODO: implement for complex types
+    UNUSED(imagVal);  // TODO(umar): implement for complex types
     try {
         const ArrayInfo& xInfo = getInfo(X);
         const ArrayInfo& yInfo = getInfo(Y);
@@ -66,8 +76,9 @@ af_err af_corrcoef(double* realVal, double* imagVal, const af_array X,
         ARG_ASSERT(2, (xType == yType));
         ARG_ASSERT(2, (xDims.ndims() == yDims.ndims()));
 
-        for (dim_t i = 0; i < xDims.ndims(); ++i)
+        for (dim_t i = 0; i < xDims.ndims(); ++i) {
             ARG_ASSERT(2, (xDims[i] == yDims[i]));
+        }
 
         switch (xType) {
             case f64: *realVal = corrcoef<double, double>(X, Y); break;

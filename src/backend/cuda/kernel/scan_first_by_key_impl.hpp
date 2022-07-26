@@ -6,24 +6,22 @@
  * The complete license agreement can be obtained at:
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
+
 #pragma once
 
 #include <Param.hpp>
-#include <backend.hpp>
 #include <common/dispatch.hpp>
+#include <common/kernel_cache.hpp>
 #include <debug_cuda.hpp>
-#include <err_cuda.hpp>
+#include <kernel/config.hpp>
 #include <memory.hpp>
-#include <nvrtc/cache.hpp>
 #include <nvrtc_kernel_headers/scan_first_by_key_cuh.hpp>
 #include <optypes.hpp>
-#include "config.hpp"
+
+#include <algorithm>
 
 namespace cuda {
 namespace kernel {
-
-static const std::string ScanFirstByKeySource(scan_first_by_key_cuh,
-                                              scan_first_by_key_cuh_len);
 
 template<typename Ti, typename Tk, typename To, af_op_t op>
 static void scan_nonfinal_launcher(Param<To> out, Param<To> tmp,
@@ -31,8 +29,8 @@ static void scan_nonfinal_launcher(Param<To> out, Param<To> tmp,
                                    CParam<Ti> in, CParam<Tk> key,
                                    const uint blocks_x, const uint blocks_y,
                                    const uint threads_x, bool inclusive_scan) {
-    auto scanbykey_first_nonfinal = getKernel(
-        "cuda::scanbykey_first_nonfinal", ScanFirstByKeySource,
+    auto scanbykey_first_nonfinal = common::getKernel(
+        "cuda::scanbykey_first_nonfinal", {scan_first_by_key_cuh_src},
         {TemplateTypename<Ti>(), TemplateTypename<Tk>(), TemplateTypename<To>(),
          TemplateArg(op)},
         {DefineValue(THREADS_PER_BLOCK), DefineKeyValue(DIMX, threads_x)});
@@ -42,8 +40,8 @@ static void scan_nonfinal_launcher(Param<To> out, Param<To> tmp,
     uint lim = divup(out.dims[0], (threads_x * blocks_x));
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
-    scanbykey_first_nonfinal(qArgs, out, tmp, tflg, tlid, in, key, blocks_x, blocks_y, lim,
-                 inclusive_scan);
+    scanbykey_first_nonfinal(qArgs, out, tmp, tflg, tlid, in, key, blocks_x,
+                             blocks_y, lim, inclusive_scan);
     POST_LAUNCH_CHECK();
 }
 
@@ -52,8 +50,8 @@ static void scan_final_launcher(Param<To> out, CParam<Ti> in, CParam<Tk> key,
                                 const uint blocks_x, const uint blocks_y,
                                 const uint threads_x, bool calculateFlags,
                                 bool inclusive_scan) {
-    auto scanbykey_first_final = getKernel(
-        "cuda::scanbykey_first_final", ScanFirstByKeySource,
+    auto scanbykey_first_final = common::getKernel(
+        "cuda::scanbykey_first_final", {scan_first_by_key_cuh_src},
         {TemplateTypename<Ti>(), TemplateTypename<Tk>(), TemplateTypename<To>(),
          TemplateArg(op)},
         {DefineValue(THREADS_PER_BLOCK), DefineKeyValue(DIMX, threads_x)});
@@ -63,8 +61,8 @@ static void scan_final_launcher(Param<To> out, CParam<Ti> in, CParam<Tk> key,
     uint lim = divup(out.dims[0], (threads_x * blocks_x));
 
     EnqueueArgs qArgs(blocks, threads, getActiveStream());
-    scanbykey_first_final(qArgs, out, in, key, blocks_x, blocks_y, lim, calculateFlags,
-              inclusive_scan);
+    scanbykey_first_final(qArgs, out, in, key, blocks_x, blocks_y, lim,
+                          calculateFlags, inclusive_scan);
     POST_LAUNCH_CHECK();
 }
 
@@ -72,9 +70,9 @@ template<typename To, af_op_t op>
 static void bcast_first_launcher(Param<To> out, Param<To> tmp, Param<int> tlid,
                                  const dim_t blocks_x, const dim_t blocks_y,
                                  const uint threads_x) {
-    auto scanbykey_first_bcast =
-        getKernel("cuda::scanbykey_first_bcast", ScanFirstByKeySource,
-                  {TemplateTypename<To>(), TemplateArg(op)});
+    auto scanbykey_first_bcast = common::getKernel(
+        "cuda::scanbykey_first_bcast", {scan_first_by_key_cuh_src},
+        {TemplateTypename<To>(), TemplateArg(op)});
     dim3 threads(threads_x, THREADS_PER_BLOCK / threads_x);
     dim3 blocks(blocks_x * out.dims[2], blocks_y * out.dims[3]);
     uint lim = divup(out.dims[0], (threads_x * blocks_x));
@@ -97,24 +95,20 @@ void scan_first_by_key(Param<To> out, CParam<Ti> in, CParam<Tk> key,
     if (blocks_x == 1) {
         scan_final_launcher<Ti, Tk, To, op>(out, in, key, blocks_x, blocks_y,
                                             threads_x, true, inclusive_scan);
-
     } else {
-        Param<To> tmp = out;
         Param<char> tmpflg;
         Param<int> tmpid;
-
-        tmp.dims[0]       = blocks_x;
-        tmpflg.dims[0]    = blocks_x;
-        tmpid.dims[0]     = blocks_x;
-        tmp.strides[0]    = 1;
-        tmpflg.strides[0] = 1;
-        tmpid.strides[0]  = 1;
-        for (int k = 1; k < 4; k++) {
-            tmpflg.dims[k]    = out.dims[k];
-            tmpid.dims[k]     = out.dims[k];
-            tmp.strides[k]    = tmp.strides[k - 1] * tmp.dims[k - 1];
-            tmpflg.strides[k] = tmpflg.strides[k - 1] * tmpflg.dims[k - 1];
-            tmpid.strides[k]  = tmpid.strides[k - 1] * tmpid.dims[k - 1];
+        Param<To> tmp  = out;
+        tmp.dims[0]    = blocks_x;
+        tmp.strides[0] = 1;
+        for (int k = 1; k < AF_MAX_DIMS; k++) {
+            tmp.strides[k] = tmp.strides[k - 1] * tmp.dims[k - 1];
+        }
+        for (int k = 0; k < AF_MAX_DIMS; k++) {
+            tmpflg.dims[k]    = tmp.dims[k];
+            tmpflg.strides[k] = tmp.strides[k];
+            tmpid.dims[k]     = tmp.dims[k];
+            tmpid.strides[k]  = tmp.strides[k];
         }
 
         int tmp_elements  = tmp.strides[3] * tmp.dims[3];

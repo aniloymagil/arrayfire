@@ -8,6 +8,7 @@
  ********************************************************/
 
 #include <Array.hpp>
+#include <common/half.hpp>
 #include <index.hpp>
 #include <sort.hpp>
 #include <sort_index.hpp>
@@ -17,6 +18,7 @@
 #include <numeric>
 #include <vector>
 
+using common::half;
 using std::iota;
 using std::min;
 using std::partial_sort_copy;
@@ -32,7 +34,7 @@ void topk(Array<T>& vals, Array<unsigned>& idxs, const Array<T>& in,
     int ndims = in.dims().ndims();
     for (int i = 0; i < ndims; i++) {
         if (i == dim) {
-            out_dims[i] = min(k, (int)in.dims()[i]);
+            out_dims[i] = min(k, static_cast<int>(in.dims()[i]));
         } else {
             out_dims[i] = in.dims()[i];
         }
@@ -53,24 +55,54 @@ void topk(Array<T>& vals, Array<unsigned>& idxs, const Array<T>& in,
         int iter = in.dims()[1] * in.dims()[2] * in.dims()[3];
         for (int i = 0; i < iter; i++) {
             auto idx_itr = begin(idx) + i * in.strides()[1];
-            auto kiptr   = iptr + k * i;
+            auto* kiptr  = iptr + k * i;
 
-            if (order == AF_TOPK_MIN) {
-                // Sort the top k values in each column
-                partial_sort_copy(
-                    idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
-                    [ptr](const uint lhs, const uint rhs) -> bool {
-                        return ptr[lhs] < ptr[rhs];
-                    });
+            if (order & AF_TOPK_MIN) {
+                if (order & AF_TOPK_STABLE) {
+                    partial_sort_copy(
+                        idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
+                        [ptr](const uint lhs, const uint rhs) -> bool {
+                            return compute_t<T>(ptr[lhs]) <
+                                           compute_t<T>(ptr[rhs])
+                                       ? true
+                                   : compute_t<T>(ptr[lhs]) ==
+                                           compute_t<T>(ptr[rhs])
+                                       ? (lhs < rhs)
+                                       : false;
+                        });
+                } else {
+                    partial_sort_copy(
+                        idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
+                        [ptr](const uint lhs, const uint rhs) -> bool {
+                            return compute_t<T>(ptr[lhs]) <
+                                   compute_t<T>(ptr[rhs]);
+                        });
+                    // Sort the top k values in each column
+                }
             } else {
-                partial_sort_copy(
-                    idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
-                    [ptr](const uint lhs, const uint rhs) -> bool {
-                        return ptr[lhs] >= ptr[rhs];
-                    });
+                if (order & AF_TOPK_STABLE) {
+                    partial_sort_copy(
+                        idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
+                        [ptr](const uint lhs, const uint rhs) -> bool {
+                            return compute_t<T>(ptr[lhs]) >
+                                           compute_t<T>(ptr[rhs])
+                                       ? true
+                                   : compute_t<T>(ptr[lhs]) ==
+                                           compute_t<T>(ptr[rhs])
+                                       ? (lhs < rhs)
+                                       : false;
+                        });
+                } else {
+                    partial_sort_copy(
+                        idx_itr, idx_itr + in.strides()[1], kiptr, kiptr + k,
+                        [ptr](const uint lhs, const uint rhs) -> bool {
+                            return compute_t<T>(ptr[lhs]) >
+                                   compute_t<T>(ptr[rhs]);
+                        });
+                }
             }
 
-            auto kvptr = vptr + k * i;
+            auto* kvptr = vptr + k * i;
             for (int j = 0; j < k; j++) {
                 // Update the value arrays with the original values
                 kvptr[j] = ptr[kiptr[j]];
@@ -96,4 +128,5 @@ INSTANTIATE(int)
 INSTANTIATE(uint)
 INSTANTIATE(long long)
 INSTANTIATE(unsigned long long)
+INSTANTIATE(half)
 }  // namespace cpu

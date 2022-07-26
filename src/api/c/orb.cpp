@@ -18,7 +18,10 @@
 #include <af/vision.h>
 
 using af::dim4;
-using namespace detail;
+
+using detail::Array;
+using detail::createEmptyArray;
+using detail::uint;
 
 template<typename T, typename convAccT>
 static void orb(af_features& feat_, af_array& descriptor, const af_array& in,
@@ -63,7 +66,7 @@ af_err af_orb(af_features* feat, af_array* desc, const af_array in,
         ARG_ASSERT(6, levels > 0);
 
         dim_t in_ndims = dims.ndims();
-        DIM_ASSERT(1, (in_ndims <= 3 && in_ndims >= 2));
+        DIM_ASSERT(1, (in_ndims == 2));
 
         af_array tmp_desc;
         af_dtype type = info.getType();

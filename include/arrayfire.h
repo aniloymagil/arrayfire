@@ -11,7 +11,11 @@
 
 /**
 
-\defgroup arrayfire_func Complete List of ArrayFire Functions
+\defgroup arrayfire_func ArrayFire Functions
+@{
+@}
+
+\defgroup arrayfire_class ArrayFire Classes
 @{
 @}
 
@@ -27,17 +31,14 @@
 
       Array constructors, random number generation, transpose, indexing, etc.
 
-      @defgroup construct_mat Constructors of array class
-      Construct an array object
-
-      @defgroup method_mat Methods of array class
-      Get information about the array object
-
       @defgroup device_mat Managing devices in ArrayFire
       getting device pointer, allocating and freeing memory
 
       @defgroup data_mat Functions to create arrays.
       constant, random, range, etc.
+
+      @defgroup c_api_mat C API to manage arrays
+      Create, release, copy, fetch-properties of \ref af_array
 
       @defgroup index_mat Assignment & Indexing operation on arrays
       Access sub regions of an array object
@@ -95,6 +96,73 @@
 
       @defgroup calc_mat Numerical differentiation
       diff, gradient, etc.
+   @}
+
+   @defgroup memory_manager Memory Management
+   @{
+      Interfaces for writing custom memory managers.
+
+      Create and set a custom memory manager by first defining the relevant
+      closures for each required function, for example:
+
+      \code{.cpp}
+          af_err my_initialize(af_memory_manager manager) {
+              void* myPayload = malloc(sizeof(MyPayload_t));
+              af_memory_manager_set_payload(manager, myPayload);
+              // ...
+          }
+
+          af_err my_allocated(af_memory_manager handle, size_t* size, void* ptr) {
+              void* myPayload;
+              af_memory_manager_get_payload(manager, &myPayload);
+              // ...
+          }
+      \endcode
+
+      Create an \ref af_memory_manager and attach relevant closures:
+
+      \code{.cpp}
+          af_memory_manager manager;
+          af_create_memory_manager(&manager);
+
+          af_memory_manager_set_initialize_fn(manager, my_initialize);
+          af_memory_manager_set_allocated_fn(manager, my_allocated);
+
+          // ...
+      \endcode
+
+      Set the memory manager to be active, which shuts down the existing memory
+      manager:
+
+      \code{.cpp}
+          af_set_memory_manager(manager);
+      \endcode
+
+      Unset to re-create and reset an instance of the default memory manager:
+
+      \code{.cpp}
+          af_unset_memory_manager();
+      \endcode
+
+      @defgroup native_memory_interface Native Memory Interface
+      \brief Native alloc, native free, get device id, etc.
+
+      @defgroup memory_manager_utils Memory Manager Utils
+      \brief Set and unset memory managers, set and get manager payloads,
+              function setters
+
+      @defgroup memory_manager_api Memory Manager API
+      \brief Functions for defining custom memory managers
+   @}
+
+   @defgroup event Events
+   @{
+
+      \brief Managing ArrayFire Events which allows manipulation of operations
+              on computation queues.
+
+      \defgroup event_api Event API
+      \brief af_create_event, af_mark_event, etc.
    @}
 
    @defgroup linalg_mat Linear Algebra
@@ -296,9 +364,6 @@
 
      Machine learning functions
 
-     @defgroup ml_pool Pooling operations
-     Pool 2D, ND, maxpooling, minpooling, meanpooling
-
      @defgroup ml_convolution Convolutions
      Forward and backward convolution passes
    @}
@@ -313,10 +378,11 @@
 #include "af/array.h"
 #include "af/backend.h"
 #include "af/blas.h"
-#include "af/constants.h"
 #include "af/complex.h"
+#include "af/constants.h"
 #include "af/data.h"
 #include "af/device.h"
+#include "af/event.h"
 #include "af/exception.h"
 #include "af/features.h"
 #include "af/gfor.h"
@@ -325,6 +391,7 @@
 #include "af/image.h"
 #include "af/index.h"
 #include "af/lapack.h"
+#include "af/memory.h"
 #include "af/ml.h"
 #include "af/random.h"
 #include "af/seq.h"

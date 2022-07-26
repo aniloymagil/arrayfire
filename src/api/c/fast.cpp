@@ -7,6 +7,7 @@
  * http://arrayfire.com/licenses/BSD-3-Clause
  ********************************************************/
 
+#include <Array.hpp>
 #include <backend.hpp>
 #include <common/err_common.hpp>
 #include <fast.hpp>
@@ -18,7 +19,12 @@
 #include <af/vision.h>
 
 using af::dim4;
-using namespace detail;
+using detail::Array;
+using detail::createEmptyArray;
+using detail::createValueArray;
+using detail::uchar;
+using detail::uint;
+using detail::ushort;
 
 template<typename T>
 static af_features fast(af_array const &in, const float thr,
@@ -58,7 +64,7 @@ af_err af_fast(af_features *out, const af_array in, const float thr,
         ARG_ASSERT(6, (feature_ratio > 0.0f && feature_ratio <= 1.0f));
 
         dim_t in_ndims = dims.ndims();
-        DIM_ASSERT(1, (in_ndims <= 3 && in_ndims >= 2));
+        DIM_ASSERT(1, (in_ndims == 2));
 
         af_dtype type = info.getType();
         switch (type) {

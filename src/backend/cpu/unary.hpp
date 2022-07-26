@@ -76,6 +76,9 @@ UNARY_OP(cbrt)
 
 UNARY_OP(tgamma)
 UNARY_OP(lgamma)
+UNARY_OP_FN(noop, )  /// Empty second parameter so it does nothing
+
+UNARY_OP_FN(bitnot, ~)
 
 #undef UNARY_OP
 #undef UNARY_OP_FN
@@ -84,11 +87,11 @@ template<typename T, af_op_t op>
 Array<T> unaryOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
     using UnaryNode = jit::UnaryNode<T, T, op>;
 
-    jit::Node_ptr in_node = in.getNode();
-    UnaryNode *node       = new UnaryNode(in_node);
+    common::Node_ptr in_node = in.getNode();
+    auto node                = std::make_shared<UnaryNode>(in_node);
 
     if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
-    return createNodeArray<T>(outDim, jit::Node_ptr(node));
+    return createNodeArray<T>(outDim, move(node));
 }
 
 #define iszero(a) ((a) == 0)
@@ -96,7 +99,8 @@ Array<T> unaryOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
 #define CHECK_FN(name, op)                                                   \
     template<typename T>                                                     \
     struct UnOp<char, T, af_##name##_t> {                                    \
-        void eval(jit::array<char> &out, const jit::array<T> &in, int lim) { \
+        void eval(jit::array<char> &out, const jit::array<compute_t<T>> &in, \
+                  int lim) {                                                 \
             for (int i = 0; i < lim; i++) { out[i] = op(in[i]); }            \
         }                                                                    \
     };
@@ -108,12 +112,11 @@ CHECK_FN(iszero, iszero)
 
 template<typename T, af_op_t op>
 Array<char> checkOp(const Array<T> &in, dim4 outDim = dim4(-1, -1, -1, -1)) {
-    jit::Node_ptr in_node = in.getNode();
-    jit::UnaryNode<char, T, op> *node =
-        new jit::UnaryNode<char, T, op>(in_node);
+    common::Node_ptr in_node = in.getNode();
+    auto node = std::make_shared<jit::UnaryNode<char, T, op>>(in_node);
 
     if (outDim == dim4(-1, -1, -1, -1)) { outDim = in.dims(); }
-    return createNodeArray<char>(outDim, jit::Node_ptr(node));
+    return createNodeArray<char>(outDim, move(node));
 }
 
 }  // namespace cpu

@@ -67,14 +67,13 @@ namespace af
 #if AF_API_VERSION >= 34
     /// \copydoc clamp(const array&, const array&, const array&)
     AFAPI array clamp(const array &in, const double lo, const array &hi);
-    /// @}
 #endif
 
 #if AF_API_VERSION >= 34
     /// \copydoc clamp(const array&, const array&, const array&)
     AFAPI array clamp(const array &in, const double lo, const double hi);
-    /// @}
 #endif
+    /// @}
 
     /// \ingroup arith_func_rem
     /// @{
@@ -269,19 +268,19 @@ namespace af
     /// function accepts two \ref af::array or one \ref af::array and a scalar
     /// as nputs.
     ///
-    /// \param[in] lhs is real value(s)
-    /// \param[in] rhs is imaginary value(s)
+    /// \param[in] real is real value(s)
+    /// \param[in] imaginary is imaginary value(s)
     /// \return complex array from inputs
     /// \ingroup arith_func_cplx
-    AFAPI array complex(const array &lhs, const array &rhs);
+    AFAPI array complex(const array &real, const array &imaginary);
 
     /// \copydoc complex(const array&, const array&)
     /// \ingroup arith_func_cplx
-    AFAPI array complex(const array &lhs, const double rhs);
+    AFAPI array complex(const array &real, const double imaginary);
 
     /// \copydoc complex(const array&, const array&)
     /// \ingroup arith_func_cplx
-    AFAPI array complex(const double lhs, const array &rhs);
+    AFAPI array complex(const double real, const array &imaginary);
 
     /// C++ Interface for creating complex array from real array
     ///
@@ -474,7 +473,7 @@ namespace af
     /// \param[in] in is input
     /// \return the natural logarithm of (1 + input)
     ///
-    /// \note This function is useful when \p is small
+    /// \note This function is useful when \p in is small
     /// \ingroup arith_func_log1p
     AFAPI array log1p  (const array &in);
 
@@ -489,7 +488,7 @@ namespace af
     /// C++ Interface for logarithm base 2
     ///
     /// \param[in] in is input
-    /// \return the logarithm of input in base 2
+    /// \return the logarithm of input \p in base 2
     ///
     /// \ingroup explog_func_log2
     AFAPI array log2   (const array &in);
@@ -742,6 +741,19 @@ extern "C" {
     */
     AFAPI af_err af_not   (af_array *out, const af_array in);
 
+#if AF_API_VERSION >= 38
+    /**
+       C Interface for performing bitwise not on input
+
+       \param[out] out will contain result of bitwise not of \p in.
+       \param[in] in is the input
+       \return \ref AF_SUCCESS if the execution completes properly
+
+       \ingroup arith_func_bitnot
+    */
+    AFAPI af_err af_bitnot   (af_array *out, const af_array in);
+#endif
+
     /**
        C Interface for performing bitwise and on two arrays
 
@@ -809,6 +821,35 @@ extern "C" {
 
     /**
        C Interface for casting an array from one type to another
+
+       This function casts an af_array object from one type to another. If the
+       type of the original array is the same as \p type then the same array is
+       returned.
+
+       \note Consecitive casting operations may be may be optimized out if the
+       original type of the af_array is the same as the final type. For example
+       if the original type is f64 which is then cast to f32 and then back to
+       f64, then the cast to f32 will be skipped and that operation will *NOT*
+       be performed by ArrayFire. The following table shows which casts will
+       be optimized out. outer -> inner -> outer
+       | inner-> | f32 | f64 | c32 | c64 | s32 | u32 | u8 | b8 | s64 | u64 | s16 | u16 | f16 |
+       |---------|-----|-----|-----|-----|-----|-----|----|----|-----|-----|-----|-----|-----|
+       | f32     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+       | f64     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+       | c32     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+       | c64     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+       | s32     | x   | x   | x   | x   | x   | x   |    |    | x   | x   |     |     | x   |
+       | u32     | x   | x   | x   | x   | x   | x   |    |    | x   | x   |     |     | x   |
+       | u8      | x   | x   | x   | x   | x   | x   | x  | x  | x   | x   | x   | x   | x   |
+       | b8      | x   | x   | x   | x   | x   | x   | x  | x  | x   | x   | x   | x   | x   |
+       | s64     | x   | x   | x   | x   |     |     |    |    | x   | x   |     |     | x   |
+       | u64     | x   | x   | x   | x   |     |     |    |    | x   | x   |     |     | x   |
+       | s16     | x   | x   | x   | x   | x   | x   |    |    | x   | x   | x   | x   | x   |
+       | u16     | x   | x   | x   | x   | x   | x   |    |    | x   | x   | x   | x   | x   |
+       | f16     | x   | x   | x   | x   |     |     |    |    |     |     |     |     | x   |
+       If you want to avoid this behavior use af_eval after the first cast
+       operation. This will ensure that the cast operation is performed on the
+       af_array
 
        \param[out] out will contain the values in the specified type
        \param[in] in is the input
@@ -1065,14 +1106,14 @@ extern "C" {
        C Interface for creating complex array from two input arrays
 
        \param[out] out will contain the complex array generated from inputs
-       \param[in] lhs is real array
-       \param[in] rhs is imaginary array
+       \param[in] real is real array
+       \param[in] imaginary is imaginary array
        \param[in] batch specifies if operations need to be performed in batch mode
        \return \ref AF_SUCCESS if the execution completes properly
 
        \ingroup arith_func_cplx
     */
-    AFAPI af_err af_cplx2 (af_array *out, const af_array lhs, const af_array rhs, const bool batch);
+    AFAPI af_err af_cplx2 (af_array *out, const af_array real, const af_array imaginary, const bool batch);
 
     /**
        C Interface for creating complex array from real array

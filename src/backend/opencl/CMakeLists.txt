@@ -5,21 +5,22 @@
 # The complete license agreement can be obtained at:
 # http://arrayfire.com/licenses/BSD-3-Clause
 
+dependency_check(OpenCL_FOUND "OpenCL not found.")
+
 include(InternalUtils)
-
-set(AF_OPENCL_BLAS_LIBRARY CLBlast CACHE STRING "Select OpenCL BLAS back-end")
-set_property(CACHE AF_OPENCL_BLAS_LIBRARY PROPERTY STRINGS "clBLAS" "CLBlast")
-
-af_deprecate(OPENCL_BLAS_LIBRARY AF_OPENCL_BLAS_LIBRARY)
-
+include(build_cl2hpp)
+include(build_CLBlast)
 include(build_clFFT)
+include(FileToString)
+
+generate_product_version(af_opencl_ver_res_file
+  FILE_NAME "afopencl"
+  FILE_DESCRIPTION "OpenCL Backend Dynamic-link library"
+)
 
 file(GLOB kernel_src kernel/*.cl kernel/KParam.hpp)
 
-set( kernel_headers_dir
-    "kernel_headers")
-
-include(FileToString)
+set( kernel_headers_dir "kernel_headers")
 
 file_to_string(
     SOURCES ${kernel_src}
@@ -45,8 +46,12 @@ add_library(ArrayFire::afopencl ALIAS afopencl)
 
 target_sources(afopencl
   PRIVATE
+    $<$<PLATFORM_ID:Windows>:${af_opencl_ver_res_file}>
     Array.cpp
     Array.hpp
+    Kernel.cpp
+    Kernel.hpp
+    Module.hpp
     Param.cpp
     Param.hpp
     all.cpp
@@ -65,7 +70,6 @@ target_sources(afopencl
     binary.hpp
     blas.cpp
     blas.hpp
-    cache.hpp
     canny.cpp
     canny.hpp
     cast.hpp
@@ -73,6 +77,7 @@ target_sources(afopencl
     cholesky.hpp
     clfft.cpp
     clfft.hpp
+    compile_module.cpp
     complex.hpp
     convolve.cpp
     convolve.hpp
@@ -87,11 +92,6 @@ target_sources(afopencl
     diagonal.hpp
     diff.cpp
     diff.hpp
-    dilate.cpp
-    dilate3d.cpp
-    erode.cpp
-    erode3d.cpp
-    err_clblas.hpp
     err_clblast.hpp
     err_opencl.hpp
     errorcodes.cpp
@@ -106,6 +106,8 @@ target_sources(afopencl
     fft.hpp
     fftconvolve.cpp
     fftconvolve.hpp
+    flood_fill.cpp
+    flood_fill.hpp
     GraphicsResourceManager.cpp
     GraphicsResourceManager.hpp
     gradient.cpp
@@ -158,9 +160,8 @@ target_sources(afopencl
     min.cpp
     moments.cpp
     moments.hpp
+    morph.cpp
     morph.hpp
-    morph3d_impl.hpp
-    morph_impl.hpp
     nearest_neighbour.cpp
     nearest_neighbour.hpp
     orb.cpp
@@ -171,8 +172,6 @@ target_sources(afopencl
     plot.hpp
     print.hpp
     product.cpp
-    program.cpp
-    program.hpp
     qr.cpp
     qr.hpp
     random_engine.cpp
@@ -187,6 +186,7 @@ target_sources(afopencl
     reorder.hpp
     resize.cpp
     resize.hpp
+    reshape.cpp
     rotate.cpp
     rotate.hpp
     scalar.hpp
@@ -273,6 +273,7 @@ target_sources(afopencl
     kernel/exampleFunction.hpp
     kernel/fast.hpp
     kernel/fftconvolve.hpp
+    kernel/flood_fill.hpp
     kernel/gradient.hpp
     kernel/harris.hpp
     kernel/histogram.hpp
@@ -315,6 +316,7 @@ target_sources(afopencl
     kernel/scan_first_by_key.hpp
     kernel/scan_first_by_key_impl.hpp
     kernel/select.hpp
+    kernel/sift.hpp
     kernel/sobel.hpp
     kernel/sort.hpp
     kernel/sort_by_key.hpp
@@ -399,7 +401,7 @@ target_include_directories(afopencl
 
 arrayfire_set_default_cxx_flags(afopencl)
 
-add_dependencies(afopencl ${cl_kernel_targets})
+add_dependencies(afopencl ${cl_kernel_targets} CLBlast-ext)
 add_dependencies(opencl_scan_by_key ${cl_kernel_targets} cl2hpp Boost::boost)
 add_dependencies(opencl_sort_by_key ${cl_kernel_targets} cl2hpp Boost::boost)
 
@@ -418,40 +420,18 @@ target_link_libraries(afopencl
     OpenCL::OpenCL
     OpenCL::cl2hpp
     afcommon_interface
-    clFFT::clFFT
+    clFFT
+    CLBlast
     opencl_scan_by_key
     opencl_sort_by_key
-    Boost::boost
     Threads::Threads
     )
 
-if(AF_OPENCL_BLAS_LIBRARY STREQUAL "clBLAS")
-  include(build_clBLAS)
-  target_compile_definitions(afopencl PRIVATE USE_CLBLAS)
-  target_link_libraries(afopencl
-    PRIVATE
-      clBLAS::clBLAS)
-elseif(AF_OPENCL_BLAS_LIBRARY STREQUAL "CLBlast")
-  include(build_CLBlast)
-  target_compile_definitions(afopencl PRIVATE USE_CLBLAST)
-  target_link_libraries(afopencl
-    PRIVATE
-      CLBlast)
-    add_dependencies(afopencl CLBlast-ext)
-endif()
-
-
-if(AF_WITH_NONFREE)
-  target_sources(afopencl PRIVATE kernel/sift_nonfree.hpp)
-  target_compile_definitions(afopencl PRIVATE AF_WITH_NONFREE_SIFT)
-endif()
-
 if(APPLE)
-  target_link_libraries(afopencl
-    PRIVATE OpenGL::GL)
+  target_link_libraries(afopencl PRIVATE OpenGL::GL)
 endif()
 
-if(LAPACK_FOUND OR MKL_FOUND)
+if(LAPACK_FOUND OR BUILD_WITH_MKL)
   target_sources(afopencl
     PRIVATE
       magma/gebrd.cpp
@@ -466,7 +446,6 @@ if(LAPACK_FOUND OR MKL_FOUND)
       magma/laswp.cpp
       magma/magma.h
       magma/magma_blas.h
-      magma/magma_blas_clblas.h
       magma/magma_blas_clblast.h
       magma/magma_common.h
       magma/magma_cpu_blas.h
@@ -485,21 +464,23 @@ if(LAPACK_FOUND OR MKL_FOUND)
       #magma/unmqr2.cpp
       )
 
-  if(USE_OPENCL_MKL)
-    dependency_check(MKL_FOUND "MKL not found")
+  if(BUILD_WITH_MKL)
     target_compile_definitions(afopencl PRIVATE USE_MKL)
+    if(MKL_BATCH)
+      target_compile_definitions(afopencl PRIVATE AF_USE_MKL_BATCH)
+    endif()
 
-    target_link_libraries(afopencl
-      PRIVATE
-        MKL::MKL)
+    if(AF_WITH_STATIC_MKL)
+        target_link_libraries(afopencl PRIVATE MKL::Static)
+        target_compile_definitions(afopencl PRIVATE USE_STATIC_MKL)
+    else()
+        target_link_libraries(afopencl PRIVATE MKL::RT)
+    endif()
   else()
-    dependency_check(OpenCL_FOUND "OpenCL not found.")
-
     if(USE_CPU_F77_BLAS)
       target_compile_definitions(afopencl PRIVATE USE_F77_BLAS)
     endif()
 
-    dependency_check(CBLAS_LIBRARIES "CBLAS not found.")
     target_include_directories(afopencl
       PRIVATE
         ${CBLAS_INCLUDE_DIR}
@@ -510,11 +491,10 @@ if(LAPACK_FOUND OR MKL_FOUND)
         ${LAPACK_LIBRARIES})
   endif()
 
-  target_compile_definitions(
-    afopencl
-    PRIVATE
-      WITH_LINEAR_ALGEBRA)
-endif(LAPACK_FOUND OR MKL_FOUND)
+  target_compile_definitions(afopencl PRIVATE WITH_LINEAR_ALGEBRA)
+endif()
+
+af_split_debug_info(afopencl ${AF_INSTALL_LIB_DIR})
 
 install(TARGETS afopencl
   EXPORT ArrayFireOpenCLTargets

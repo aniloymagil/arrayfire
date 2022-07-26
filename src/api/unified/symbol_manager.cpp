@@ -26,10 +26,10 @@
 #include <dlfcn.h>
 #endif
 
+using common::getErrorMessage;
 using common::getFunctionPointer;
 using common::loadLibrary;
 using common::loggerFactory;
-using common::unloadLibrary;
 
 using std::extent;
 using std::function;
@@ -86,7 +86,7 @@ string getBackendDirectoryName(const af_backend backend) {
 string join_path(string first) { return first; }
 
 template<typename... ARGS>
-string join_path(string first, ARGS... args) {
+string join_path(const string& first, ARGS... args) {
     if (first.empty()) {
         return join_path(args...);
     } else {
@@ -105,8 +105,10 @@ LibHandle openDynLibrary(const af_backend bknd_idx) {
     // FIXME(umar): avoid this if at all possible
     auto getLogger = [&] { return spdlog::get("unified"); };
 
-    string paths[] = {
-        "",   // Default paths
+    string pathPrefixes[] = {
+        "",   // empty prefix i.e. just the library name will enable search in
+              // system default paths such as LD_LIBRARY_PATH, Program
+              // Files(Windows) etc.
         ".",  // Shared libraries in current directory
         // Running from the CMake Build directory
         join_path(".", "src", "backend", getBackendDirectoryName(bknd_idx)),
@@ -133,18 +135,22 @@ LibHandle openDynLibrary(const af_backend bknd_idx) {
     typedef af_err (*func)(int*);
 
     LibHandle retVal = nullptr;
-    for (size_t i = 0; i < extent<decltype(paths)>::value; i++) {
-        AF_TRACE("Attempting: {}", paths[i]);
-        if ((retVal = loadLibrary(join_path(paths[i], bkndLibName).c_str()))) {
-            AF_TRACE("Found: {}", join_path(paths[i], bkndLibName));
 
-            func count_func =
-                (func)getFunctionPointer(retVal, "af_get_device_count");
+    for (auto& pathPrefixe : pathPrefixes) {
+        AF_TRACE("Attempting: {}",
+                 (pathPrefixe.empty() ? "Default System Paths" : pathPrefixe));
+        if ((retVal =
+                 loadLibrary(join_path(pathPrefixe, bkndLibName).c_str()))) {
+            AF_TRACE("Found: {}", join_path(pathPrefixe, bkndLibName));
+
+            func count_func = reinterpret_cast<func>(
+                getFunctionPointer(retVal, "af_get_device_count"));
             if (count_func) {
                 int count = 0;
                 count_func(&count);
                 AF_TRACE("Device Count: {}.", count);
                 if (count == 0) {
+                    AF_TRACE("Skipping: No devices found for {}", bkndLibName);
                     retVal = nullptr;
                     continue;
                 }
@@ -152,24 +158,29 @@ LibHandle openDynLibrary(const af_backend bknd_idx) {
 
             if (show_load_path) { printf("Using %s\n", bkndLibName.c_str()); }
             break;
+        } else {
+            AF_TRACE("Failed to load {}", getErrorMessage());
         }
     }
-
     return retVal;
-}
-
-void closeDynLibrary(LibHandle handle) { unloadLibrary(handle); }
-
-AFSymbolManager& AFSymbolManager::getInstance() {
-    thread_local AFSymbolManager symbolManager;
-    return symbolManager;
 }
 
 spdlog::logger* AFSymbolManager::getLogger() { return logger.get(); }
 
+af::Backend& getActiveBackend() {
+    thread_local af_backend activeBackend =
+        AFSymbolManager::getInstance().getDefaultBackend();
+    return activeBackend;
+}
+
+LibHandle& getActiveHandle() {
+    thread_local LibHandle activeHandle =
+        AFSymbolManager::getInstance().getDefaultHandle();
+    return activeHandle;
+}
+
 AFSymbolManager::AFSymbolManager()
-    : activeHandle(nullptr)
-    , defaultHandle(nullptr)
+    : defaultHandle(nullptr)
     , numBackends(0)
     , backendsAvailable(0)
     , logger(loggerFactory("unified")) {
@@ -177,87 +188,62 @@ AFSymbolManager::AFSymbolManager()
     static const af_backend order[] = {AF_BACKEND_CUDA, AF_BACKEND_OPENCL,
                                        AF_BACKEND_CPU};
 
+    LibHandle handle    = nullptr;
+    af::Backend backend = AF_BACKEND_DEFAULT;
     // Decremeting loop. The last successful backend loaded will be the most
     // prefered one.
     for (int i = NUM_BACKENDS - 1; i >= 0; i--) {
-        int backend          = order[i] >> 1;  // 2 4 1 -> 1 2 0
-        bkndHandles[backend] = openDynLibrary(order[i]);
-        if (bkndHandles[backend]) {
-            activeHandle  = bkndHandles[backend];
-            activeBackend = (af_backend)order[i];
+        int backend_index          = order[i] >> 1U;  // 2 4 1 -> 1 2 0
+        bkndHandles[backend_index] = openDynLibrary(order[i]);
+        if (bkndHandles[backend_index]) {
+            handle  = bkndHandles[backend_index];
+            backend = order[i];
             numBackends++;
             backendsAvailable += order[i];
         }
     }
-    if (activeBackend) {
-        AF_TRACE("AF_DEFAULT_BACKEND: {}",
-                 getBackendDirectoryName(activeBackend));
+    if (backend) {
+        AF_TRACE("AF_DEFAULT_BACKEND: {}", getBackendDirectoryName(backend));
+        defaultBackend = backend;
+    } else {
+        logger->error("Backend was not found");
+        defaultBackend = AF_BACKEND_DEFAULT;
     }
 
     // Keep a copy of default order handle inorder to use it in ::setBackend
     // when the user passes AF_BACKEND_DEFAULT
-    defaultHandle  = activeHandle;
-    defaultBackend = activeBackend;
+    defaultHandle = handle;
 }
 
 AFSymbolManager::~AFSymbolManager() {
-    for (int i = 0; i < NUM_BACKENDS; ++i) {
-        if (bkndHandles[i]) { closeDynLibrary(bkndHandles[i]); }
+    for (auto& bkndHandle : bkndHandles) {
+        if (bkndHandle) { common::unloadLibrary(bkndHandle); }
     }
 }
 
-unsigned AFSymbolManager::getBackendCount() { return numBackends; }
+unsigned AFSymbolManager::getBackendCount() const { return numBackends; }
 
-int AFSymbolManager::getAvailableBackends() { return backendsAvailable; }
+int AFSymbolManager::getAvailableBackends() const { return backendsAvailable; }
 
-af_err AFSymbolManager::setBackend(af::Backend bknd) {
+af_err setBackend(af::Backend bknd) {
+    auto& instance = AFSymbolManager::getInstance();
     if (bknd == AF_BACKEND_DEFAULT) {
-        if (defaultHandle) {
-            activeHandle  = defaultHandle;
-            activeBackend = defaultBackend;
+        if (instance.getDefaultHandle()) {
+            getActiveHandle()  = instance.getDefaultHandle();
+            getActiveBackend() = instance.getDefaultBackend();
             return AF_SUCCESS;
         } else {
             UNIFIED_ERROR_LOAD_LIB();
         }
     }
-    int idx = bknd >> 1;  // Convert 1, 2, 4 -> 0, 1, 2
-    if (bkndHandles[idx]) {
-        activeHandle  = bkndHandles[idx];
-        activeBackend = bknd;
+    int idx = bknd >> 1U;  // Convert 1, 2, 4 -> 0, 1, 2
+    if (instance.getHandle(idx)) {
+        getActiveHandle()  = instance.getHandle(idx);
+        getActiveBackend() = bknd;
         return AF_SUCCESS;
     } else {
         UNIFIED_ERROR_LOAD_LIB();
     }
-}
-
-bool checkArray(af_backend activeBackend, const af_array a) {
-    // Convert af_array into int to retrieve the backend info.
-    // See ArrayInfo.hpp for more
-    af_backend backend = (af_backend)0;
-
-    // This condition is required so that the invalid args tests for unified
-    // backend return the expected error rather than AF_ERR_ARR_BKND_MISMATCH
-    // Since a = 0, does not have a backend specified, it should be a
-    // AF_ERR_ARG instead of AF_ERR_ARR_BKND_MISMATCH
-    if (a == 0) return true;
-
-    unified::AFSymbolManager::getInstance().call("af_get_backend_id", &backend,
-                                                 a);
-    return backend == activeBackend;
-}
-
-bool checkArray(af_backend activeBackend, const af_array* a) {
-    if (a) {
-        return checkArray(activeBackend, *a);
-    } else {
-        return true;
-    }
-}
-
-bool checkArrays(af_backend activeBackend) {
-    UNUSED(activeBackend);
-    // Dummy
-    return true;
 }
 
 }  // namespace unified

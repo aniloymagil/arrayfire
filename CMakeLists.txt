@@ -1,4 +1,4 @@
-# Copyright (c) 2017, ArrayFire
+# Copyright (c) 2021, ArrayFire
 # All rights reserved.
 #
 # This file is distributed under 3-clause BSD license.
@@ -6,32 +6,47 @@
 # http://arrayfire.com/licenses/BSD-3-Clause
 
 cmake_minimum_required(VERSION 3.5)
-project(ArrayFire
-  VERSION 3.7.0
-  LANGUAGES C CXX )
+
+include(CMakeModules/AF_vcpkg_options.cmake)
+
+project(ArrayFire VERSION 3.9.0 LANGUAGES C CXX)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
+
+include(AFconfigure_deps_vars)
+include(AFBuildConfigurations)
 include(AFInstallDirs)
 include(CMakeDependentOption)
 include(InternalUtils)
 include(Version)
-include(build_cl2hpp)
 include(platform)
 include(GetPrerequisites)
 include(CheckCXXCompilerFlag)
+include(CheckSymbolExists)
+include(SplitDebugInfo)
+
+# Use the function generate_product_version on Windows
+# to attach version info in dll file attributes.
+# Make sure to pass appropriate arguments for each backend
+# to generate the correct resource file
+include(generate_product_version)
 
 set_policies(
   TYPE NEW
   POLICIES CMP0073
-           CMP0074)
+           CMP0074
+           CMP0077
+           CMP0079)
 arrayfire_set_cmake_default_variables()
 
 #Set Intel OpenMP as default MKL thread layer
 set(MKL_THREAD_LAYER "Intel OpenMP" CACHE STRING "The thread layer to choose for MKL")
 
-find_package(CUDA 7.0)
+find_package(CUDA 9.0)
+find_package(cuDNN 4.0)
 find_package(OpenCL 1.2)
 find_package(OpenGL)
+find_package(glad CONFIG QUIET)
 find_package(FreeImage)
 find_package(Threads)
 find_package(FFTW)
@@ -39,8 +54,10 @@ find_package(CBLAS)
 find_package(LAPACKE)
 find_package(Doxygen)
 find_package(MKL)
+find_package(spdlog 1.8.5 QUIET)
 
 include(boost_package)
+include(config_ccache)
 
 option(AF_BUILD_CPU      "Build ArrayFire with a CPU backend"        ON)
 option(AF_BUILD_CUDA     "Build ArrayFire with a CUDA backend"       ${CUDA_FOUND})
@@ -48,11 +65,42 @@ option(AF_BUILD_OPENCL   "Build ArrayFire with a OpenCL backend"     ${OpenCL_FO
 option(AF_BUILD_UNIFIED  "Build Backend-Independent ArrayFire API"   ON)
 option(AF_BUILD_DOCS     "Create ArrayFire Documentation"            ${DOXYGEN_FOUND})
 option(AF_BUILD_EXAMPLES "Build Examples"                            ON)
+option(AF_WITH_CUDNN     "Use cuDNN for convolveNN functions"        ${cuDNN_FOUND})
 option(AF_BUILD_FORGE
     "Forge libs are not built by default as it is not link time dependency" OFF)
 
 option(AF_WITH_NONFREE  "Build ArrayFire nonfree algorithms"   OFF)
 option(AF_WITH_LOGGING  "Build ArrayFire with logging support" ON)
+option(AF_WITH_STACKTRACE  "Add stacktraces to the error messages." ON)
+option(AF_CACHE_KERNELS_TO_DISK "Enable caching kernels to disk" ON)
+option(AF_WITH_STATIC_MKL "Link against static Intel MKL libraries" OFF)
+option(AF_WITH_STATIC_CUDA_NUMERIC_LIBS "Link libafcuda with static numeric libraries(cublas, cufft, etc.)" OFF)
+
+if(AF_WITH_STATIC_CUDA_NUMERIC_LIBS)
+  option(AF_WITH_PRUNE_STATIC_CUDA_NUMERIC_LIBS "Prune CUDA static libraries to reduce binary size.(WARNING: May break some libs on older CUDA toolkits for some compute arch)" OFF)
+endif()
+
+set(default_compute_library "FFTW/LAPACK/BLAS")
+if(MKL_FOUND)
+  set(default_compute_library "Intel-MKL")
+endif()
+
+af_multiple_option(NAME        AF_COMPUTE_LIBRARY
+                   DEFAULT     ${default_compute_library}
+                   DESCRIPTION "Compute library for signal processing and linear algebra routines"
+                   OPTIONS     "Intel-MKL" "FFTW/LAPACK/BLAS")
+
+if(WIN32)
+  af_multiple_option(NAME         AF_STACKTRACE_TYPE
+                     DEFAULT      "Windbg"
+                     DESCRIPTION  "The type of backtrace features. Windbg(simple), None"
+                     OPTIONS       "Windbg" "None")
+else()
+  af_multiple_option(NAME         AF_STACKTRACE_TYPE
+                     DEFAULT      "Basic"
+                     DESCRIPTION  "The type of backtrace features. Basic(simple), libbacktrace(fancy), addr2line(fancy), None"
+                     OPTIONS       "Basic" "libbacktrace" "addr2line" "None")
+endif()
 
 option(AF_INSTALL_STANDALONE "Build installers that include all dependencies" OFF)
 
@@ -78,37 +126,128 @@ af_deprecate(BUILD_EXAMPLES        AF_BUILD_EXAMPLES)
 af_deprecate(USE_RELATIVE_TEST_DIR AF_WITH_RELATIVE_TEST_DIR)
 af_deprecate(USE_FREEIMAGE_STATIC  AF_WITH_STATIC_FREEIMAGE)
 af_deprecate(USE_CPUID             AF_WITH_CPUID)
+if(DEFINED USE_CPU_MKL OR DEFINED USE_OPENCL_MKL)
+  # Cannot use af_deprecated as it expects the new and old variables to store values of
+  # same type. In this case, USE_*_MKL variables are BOOLs and AF_COMPUTE_LIBRARY is a STRING
+  message(DEPRECATION
+    "Variables USE_CPU_MKL/USE_OPENCL_MKL are deprecated. Use AF_COMPUTE_LIBRARY instead.")
+  message(WARNING
+    "USE_CPU_MKL/USE_OPENCL_MKL defined. These values take precendence over the value of
+    AF_COMPUTE_LIBRARY until they are removed to preserve existing build behavior.")
+  # Until USE_CPU_MKL and USE_OPENCL_MKL are removed, if they are defined, they take
+  # precendence and cmake will check and report error if Intel-MKL is not found
+  if(USE_CPU_MKL OR USE_OPENCL_MKL)
+    get_property(doc CACHE AF_COMPUTE_LIBRARY PROPERTY HELPSTRING)
+    set(AF_COMPUTE_LIBRARY "Intel-MKL" CACHE STRING "${doc}" FORCE)
+  endif()
+endif()
 
 mark_as_advanced(
   AF_BUILD_FRAMEWORK
+  AF_CACHE_KERNELS_TO_DISK
   AF_INSTALL_STANDALONE
   AF_WITH_CPUID
+  AF_WITH_LOGGING
+  AF_WITH_STACKTRACE
+  AF_WITH_STATIC_FREEIMAGE
+  AF_WITH_NONFREE
+  AF_WITH_IMAGEIO
+  AF_WITH_RELATIVE_TEST_DIR
+  AF_TEST_WITH_MTX_FILES
+  ArrayFire_DIR
+  Boost_INCLUDE_DIR
   CUDA_HOST_COMPILER
+  CUDA_SDK_ROOT_DIR
   CUDA_USE_STATIC_CUDA_RUNTIME
   CUDA_rt_LIBRARY
   SPDLOG_BUILD_EXAMPLES
-  SPDLOG_BUILD_TESTING)
+  SPDLOG_BUILD_TESTING
+  ADDR2LINE_PROGRAM
+  Backtrace_LIBRARY
+  AF_WITH_STATIC_MKL
+  GIT
+  Forge_DIR
+  glad_DIR
+  spdlog_DIR
+  FG_BUILD_OFFLINE
+  )
+mark_as_advanced(CLEAR CUDA_VERSION)
+
+# IF: the old USE_CPU_MKL/USE_OPENCL_MKL flags are present,
+# THEN Irrespective of AF_COMPUTE_LIBRARY value, continue with MKL to preserve old
+#      behavior. Once the deprecated USE_CPU_MKL/USE_OPENCL_MKL are removed in later
+#      versions AF_COMPUTE_LIBRARY will take over total control of selecting CPU
+#      compute backend.
+#
+# Note that the default value of AF_COMPUTE_LIBRARY is Intel-MKL.
+# Also, cmake doesn't have short-circuit of OR/AND conditions in if
+if(${AF_BUILD_CPU} OR ${AF_BUILD_OPENCL})
+  if("${AF_COMPUTE_LIBRARY}" STREQUAL "Intel-MKL"
+      OR "${AF_COMPUTE_LIBRARY}" STREQUAL "MKL")
+    af_mkl_batch_check()
+    dependency_check(MKL_FOUND "Please ensure Intel-MKL / oneAPI-oneMKL is installed")
+    set(BUILD_WITH_MKL ON)
+  elseif("${AF_COMPUTE_LIBRARY}" STREQUAL "FFTW/LAPACK/BLAS")
+    dependency_check(FFTW_FOUND "FFTW not found")
+    dependency_check(CBLAS_FOUND "CBLAS not found")
+    if(UNIX AND NOT APPLE)
+      dependency_check(LAPACK_FOUND "LAPACK not found")
+    endif()
+  endif()
+endif()
 
 #Configure forge submodule
 #forge is included in ALL target if AF_BUILD_FORGE is ON
 #otherwise, forge is not built at all
-include(AFconfigure_forge_submodule)
+include(AFconfigure_forge_dep)
+add_library(af_spdlog INTERFACE)
+set_target_properties(af_spdlog
+  PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS FMT_HEADER_ONLY)
+
+if(TARGET spdlog::spdlog_header_only)
+  target_include_directories(af_spdlog
+    SYSTEM INTERFACE
+      $<TARGET_PROPERTY:spdlog::spdlog_header_only,INTERFACE_INCLUDE_DIRECTORIES>
+    )
+else()
+  af_dep_check_and_populate(${spdlog_prefix}
+    URI https://github.com/gabime/spdlog.git
+    REF v1.8.5
+  )
+  target_include_directories(af_spdlog INTERFACE "${${spdlog_prefix}_SOURCE_DIR}/include")
+endif()
+
+if(NOT TARGET glad::glad)
+  af_dep_check_and_populate(${glad_prefix}
+    URI https://github.com/arrayfire/glad.git
+    REF main
+  )
+  add_subdirectory(${${glad_prefix}_SOURCE_DIR} ${${glad_prefix}_BINARY_DIR})
+
+  add_library(af_glad STATIC $<TARGET_OBJECTS:af_glad_obj_lib>)
+  target_link_libraries(af_glad PUBLIC ${CMAKE_DL_LIBS})
+  target_include_directories(af_glad
+    PUBLIC
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:af_glad_obj_lib,INTERFACE_INCLUDE_DIRECTORIES>>
+    )
+endif()
+
+af_dep_check_and_populate(span-lite
+  URI https://github.com/martinmoene/span-lite
+  REF "ccf2351"
+  )
+
+af_dep_check_and_populate(${assets_prefix}
+  URI https://github.com/arrayfire/assets.git
+  REF master
+)
+set(ASSETS_DIR ${${assets_prefix}_SOURCE_DIR})
 
 configure_file(
     ${ArrayFire_SOURCE_DIR}/CMakeModules/version.hpp.in
     ${ArrayFire_BINARY_DIR}/version.hpp
 )
-
-if(AF_WITH_NONFREE)
-  message("Building with NONFREE requires the following patents")
-  message("Method and apparatus for identifying scale invariant features\n"
-    "in an image and use of same for locating an object in an image, David\n"
-    "G. Lowe, US Patent 6,711,293 (March 23, 2004). Provisional application\n"
-    "filed March 8, 1999. Asignee: The University of British Columbia. For\n"
-    "further details, contact David Lowe (lowe@cs.ubc.ca) or the\n"
-    "University-Industry Liaison Office of the University of British\n"
-    "Columbia.")
-endif()
 
 # when crosscompiling use the bin2cpp file from the native bin directory
 if(CMAKE_CROSSCOMPILING)
@@ -121,10 +260,27 @@ if(CMAKE_CROSSCOMPILING)
                        "directory and build the bin2cpp target.")
   endif()
 else()
-  add_executable(bin2cpp ${ArrayFire_SOURCE_DIR}/CMakeModules/bin2cpp.cpp)
-  target_link_libraries(bin2cpp)
+  add_executable(bin2cpp ${ArrayFire_SOURCE_DIR}/CMakeModules/bin2cpp.cpp
+                         ${ArrayFire_SOURCE_DIR}/src/backend/common/util.cpp)
+  if(WIN32)
+    target_compile_definitions(bin2cpp PRIVATE OS_WIN)
+  elseif(APPLE)
+    target_compile_definitions(bin2cpp PRIVATE OS_MAC)
+  elseif(UNIX)
+    target_compile_definitions(bin2cpp PRIVATE OS_LNX)
+  endif()
+  target_include_directories(bin2cpp PRIVATE
+                             ${ArrayFire_SOURCE_DIR}/include
+                             ${ArrayFire_BINARY_DIR}/include
+                             ${ArrayFire_SOURCE_DIR}/src/backend)
+  if(TARGET spdlog::spdlog_header_only)
+    target_link_libraries(bin2cpp PRIVATE spdlog::spdlog_header_only)
+  else()
+    target_link_libraries(bin2cpp PRIVATE af_spdlog)
+  endif()
   export(TARGETS bin2cpp FILE ${CMAKE_BINARY_DIR}/ImportExecutables.cmake)
 endif()
+
 
 if(NOT LAPACK_FOUND)
     if(APPLE)
@@ -137,9 +293,6 @@ if(NOT LAPACK_FOUND)
     endif()
 endif()
 
-set(SPDLOG_BUILD_TESTING OFF)
-add_subdirectory(extern/spdlog EXCLUDE_FROM_ALL)
-add_subdirectory(extern/glad)
 add_subdirectory(src/backend/common)
 add_subdirectory(src/api/c)
 add_subdirectory(src/api/cpp)
@@ -169,6 +322,21 @@ set_target_properties(${built_backends} PROPERTIES
                       VERSION "${ArrayFire_VERSION}"
                       SOVERSION "${ArrayFire_VERSION_MAJOR}")
 
+if(AF_INSTALL_STANDALONE)
+
+  # This flag enables the use of RUNPATH instead of RPATH which is the
+  # preferred method to set the runtime lookup. Only doind this for
+  # standalone builds because we include all libraries with the installers
+  # and they are included in the same directory so the RUNPATH is set to
+  # $ORIGIN. This avoid setting the linker path in ld.so.conf.d
+  check_cxx_compiler_flag("-Wl,--enable-new-dtags" HAS_RUNPATH_FLAG)
+  if(HAS_RUNPATH_FLAG)
+    set_target_properties(${built_backends} PROPERTIES
+      INSTALL_RPATH "$ORIGIN"
+      LINK_OPTIONS "-Wl,--enable-new-dtags")
+  endif()
+endif()
+
 # On some distributions the linker will not add a library to the ELF header if
 # the symbols are not needed when the library was first parsed by the linker.
 # This causes undefined references issues when linking with libraries which have
@@ -178,11 +346,21 @@ if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU")
                         LINK_FLAGS "-Wl,--no-as-needed")
 endif()
 
+
+find_library(Backtrace_LIBRARY backtrace
+  DOC "libbacktrace.so file for more informative stacktraces. https://github.com/ianlancetaylor/libbacktrace")
+find_program(ADDR2LINE_PROGRAM addr2line
+  DOC "The path to the addr2line program for informative stacktraces")
+
 foreach(backend ${built_backends})
   target_compile_definitions(${backend} PRIVATE AFDLL)
   if(AF_WITH_LOGGING)
     target_compile_definitions(${backend}
       PRIVATE AF_WITH_LOGGING)
+  endif()
+  if(AF_CACHE_KERNELS_TO_DISK)
+    target_compile_definitions(${backend}
+      PRIVATE AF_CACHE_KERNELS_TO_DISK)
   endif()
 endforeach()
 
@@ -213,8 +391,6 @@ install(FILES ${ArrayFire_BINARY_DIR}/include/af/version.h
         DESTINATION "${AF_INSTALL_INC_DIR}/af/"
         COMPONENT headers)
 
-#TODO(pradeep) install forge dependency for packaging - not required for builds
-
 # install the examples irrespective of the AF_BUILD_EXAMPLES value
 # only the examples source files are installed, so the installation of these
 # source files does not depend on AF_BUILD_EXAMPLES
@@ -224,7 +400,7 @@ install(DIRECTORY examples/ #NOTE The slash at the end is important
     DESTINATION ${AF_INSTALL_EXAMPLE_DIR}
     COMPONENT examples)
 
-install(DIRECTORY assets/examples/ #NOTE The slash at the end is important
+install(DIRECTORY ${ASSETS_DIR}/examples/ #NOTE The slash at the end is important
     DESTINATION ${AF_INSTALL_EXAMPLE_DIR}
     COMPONENT examples)
 
@@ -239,7 +415,7 @@ foreach(backend CPU CUDA OpenCL Unified)
     install(EXPORT ArrayFire${backend}Targets
             NAMESPACE ArrayFire::
             DESTINATION ${AF_INSTALL_CMAKE_DIR}
-            COMPONENT ${lower_backend})
+            COMPONENT ${lower_backend}_dev)
 
     export( EXPORT ArrayFire${backend}Targets
             NAMESPACE ArrayFire::
@@ -258,7 +434,7 @@ write_basic_package_version_file(
 set(INCLUDE_DIRS include)
 set(CMAKE_DIR ${AF_INSTALL_CMAKE_DIR})
 configure_package_config_file(
-  ${CMAKE_MODULE_PATH}/ArrayFireConfig.cmake.in
+  ${ArrayFire_SOURCE_DIR}/CMakeModules/ArrayFireConfig.cmake.in
   cmake/install/ArrayFireConfig.cmake
   INSTALL_DESTINATION "${AF_INSTALL_CMAKE_DIR}"
   PATH_VARS INCLUDE_DIRS CMAKE_DIR
@@ -269,32 +445,45 @@ install(FILES ${ArrayFire_BINARY_DIR}/cmake/install/ArrayFireConfig.cmake
               DESTINATION ${AF_INSTALL_CMAKE_DIR}
               COMPONENT cmake)
 
-if((USE_CPU_MKL OR USE_OPENCL_MKL) AND TARGET MKL::MKL AND AF_INSTALL_STANDALONE)
+if(BUILD_WITH_MKL AND AF_INSTALL_STANDALONE)
   if(TARGET MKL::ThreadingLibrary)
+    get_filename_component(mkl_tl ${MKL_ThreadingLibrary_LINK_LIBRARY} REALPATH)
     install(FILES
       $<TARGET_FILE:MKL::ThreadingLibrary>
+      ${mkl_tl}
       DESTINATION ${AF_INSTALL_LIB_DIR}
       COMPONENT mkl_dependencies)
   endif()
 
-  if(NOT WIN32)
+  if(NOT AF_WITH_STATIC_MKL AND TARGET MKL::Shared)
+    if(NOT WIN32)
+      get_filename_component(mkl_int ${MKL_Interface_LINK_LIBRARY} REALPATH)
+      install(FILES
+        $<TARGET_FILE:MKL::Interface>
+        ${mkl_int}
+        DESTINATION ${AF_INSTALL_LIB_DIR}
+        COMPONENT mkl_dependencies)
+    endif()
+
+    get_filename_component(mkl_rnt ${MKL_RT_LINK_LIBRARY} REALPATH)
+    get_filename_component(mkl_shd ${MKL_Core_LINK_LIBRARY} REALPATH)
+    get_filename_component(mkl_tly ${MKL_ThreadLayer_LINK_LIBRARY} REALPATH)
     install(FILES
-      $<TARGET_FILE:MKL::Interface>
+      ${mkl_rnt}
+      ${mkl_shd}
+      ${mkl_tly}
+      $<TARGET_FILE:MKL::RT>
+      $<TARGET_FILE:MKL::Shared>
+      $<TARGET_FILE:MKL::ThreadLayer>
+      ${MKL_RUNTIME_KERNEL_LIBRARIES}
+
+      # This variable is used to add tbb.so.2 library because the main lib
+      # is a linker script and not a symlink so it cant be resolved using
+      # get_filename_component
+      ${AF_ADDITIONAL_MKL_LIBRARIES}
       DESTINATION ${AF_INSTALL_LIB_DIR}
       COMPONENT mkl_dependencies)
   endif()
-
-  install(FILES
-    $<TARGET_FILE:MKL::MKL>
-    $<TARGET_FILE:MKL::ThreadLayer>
-    ${MKL_RUNTIME_KERNEL_LIBRARIES}
-
-    # This variable is used to add tbb.so.2 library because the main lib
-    # is a linker script and not a symlink so it cant be resolved using
-    # get_filename_component
-    ${AF_ADDITIONAL_MKL_LIBRARIES}
-    DESTINATION ${AF_INSTALL_LIB_DIR}
-    COMPONENT mkl_dependencies)
 endif()
 
 # This file will be used to create the config file for the build directory.
@@ -303,7 +492,7 @@ endif()
 set(INCLUDE_DIRS "${ArrayFire_SOURCE_DIR}/include" "${ArrayFire_BINARY_DIR}/include")
 set(CMAKE_DIR "${ArrayFire_BINARY_DIR}/cmake")
 configure_package_config_file(
-  ${CMAKE_MODULE_PATH}/ArrayFireConfig.cmake.in
+  ${ArrayFire_SOURCE_DIR}/CMakeModules/ArrayFireConfig.cmake.in
   ArrayFireConfig.cmake
   INSTALL_DESTINATION "${ArrayFire_BINARY_DIR}"
   PATH_VARS INCLUDE_DIRS CMAKE_DIR
@@ -321,7 +510,7 @@ configure_package_config_file(
 unset(CMAKE_CXX_VISIBILITY_PRESET)
 
 configure_file(
-  ${CMAKE_MODULE_PATH}/CTestCustom.cmake
+  ${ArrayFire_SOURCE_DIR}/CMakeModules/CTestCustom.cmake
   ${ArrayFire_BINARY_DIR}/CTestCustom.cmake)
 
 include(CTest)
@@ -333,8 +522,28 @@ endif()
 
 conditional_directory(BUILD_TESTING test)
 
-set(ASSETS_DIR "${ArrayFire_SOURCE_DIR}/assets")
 conditional_directory(AF_BUILD_EXAMPLES examples)
 conditional_directory(AF_BUILD_DOCS docs)
 
 include(CPackConfig)
+
+# VCPKG variables that aren't necessarily important
+# for ArrayFire Development. They are marked hidden.
+# If VCPKG is not used, marking them is not harmful
+mark_as_advanced(
+  VCPKG_APPLOCAL_DEPS
+  VCPKG_BOOTSTRAP_OPTIONS
+  VCPKG_INSTALL_OPTIONS
+  VCPKG_MANIFEST_DIR
+  VCPKG_MANIFEST_INSTALL
+  VCPKG_MANIFEST_MODE
+  VCPKG_OVERLAY_PORTS
+  VCPKG_OVERLAY_TRIPLETS
+  VCPKG_TARGET_TRIPLET
+  X_VCPKG_APPLOCAL_DEPS_INSTALL
+  X_VCPKG_APPLOCAL_DEPS_SERIALIZED
+  Z_VCPKG_BUILTIN_POWERSHELL_PATH
+  Z_VCPKG_PWSH_PATH
+  Z_VCPKG_CL
+  _VCPKG_INSTALLED_DIR
+  )

@@ -11,21 +11,31 @@
 
 #include <common/half.hpp>
 #include <common/jit/NodeIterator.hpp>
+#include <common/jit/ScalarNode.hpp>
 #include <common/util.hpp>
-#include <common/traits.hpp>
 #include <copy.hpp>
 #include <err_opencl.hpp>
 #include <jit/BufferNode.hpp>
 #include <memory.hpp>
 #include <platform.hpp>
 #include <scalar.hpp>
+#include <traits.hpp>
 #include <af/dim4.hpp>
 #include <af/opencl.h>
 
 #include <cstddef>
+#include <cstdlib>
+#include <memory>
 #include <numeric>
 
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
+
+#include <vector>
+
 using af::dim4;
+using af::dtype_traits;
 
 using cl::Buffer;
 
@@ -35,49 +45,81 @@ using common::Node_ptr;
 using common::NodeIterator;
 using opencl::jit::BufferNode;
 
+using nonstd::span;
 using std::accumulate;
 using std::is_standard_layout;
 using std::make_shared;
+using std::shared_ptr;
 using std::vector;
 
 namespace opencl {
 template<typename T>
-Node_ptr bufferNodePtr() {
-    return make_shared<BufferNode>(dtype_traits<T>::getName(),
-                                   shortname<T>(true));
+shared_ptr<BufferNode> bufferNodePtr() {
+    return make_shared<BufferNode>(
+        static_cast<af::dtype>(dtype_traits<T>::af_type));
+}
+
+namespace {
+template<typename T>
+void verifyTypeSupport() {}
+
+template<>
+void verifyTypeSupport<double>() {
+    if (!isDoubleSupported(getActiveDeviceId())) {
+        AF_ERROR("Double precision not supported", AF_ERR_NO_DBL);
+    }
+}
+
+template<>
+void verifyTypeSupport<cdouble>() {
+    if (!isDoubleSupported(getActiveDeviceId())) {
+        AF_ERROR("Double precision not supported", AF_ERR_NO_DBL);
+    }
+}
+
+template<>
+void verifyTypeSupport<common::half>() {
+    if (!isHalfSupported(getActiveDeviceId())) {
+        AF_ERROR("Half precision not supported", AF_ERR_NO_HALF);
+    }
+}
+}  // namespace
+
+template<typename T>
+Array<T>::Array(const dim4 &dims)
+    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(memAlloc<T>(info.elements()).release(), bufferFree)
+    , data_dims(dims)
+    , node()
+    , owner(true) {}
+
+template<typename T>
+Array<T>::Array(const dim4 &dims, Node_ptr n)
+    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data_dims(dims)
+    , node(std::move(n))
+    , owner(true) {
+    if (node->isBuffer()) {
+        data = std::static_pointer_cast<BufferNode>(node)->getDataPointer();
+    }
 }
 
 template<typename T>
-Array<T>::Array(dim4 dims)
+Array<T>::Array(const dim4 &dims, const T *const in_data)
     : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
-           (af_dtype)dtype_traits<T>::af_type)
-    , data(bufferAlloc(info.elements() * sizeof(T)), bufferFree)
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(memAlloc<T>(info.elements()).release(), bufferFree)
     , data_dims(dims)
-    , node(bufferNodePtr<T>())
-    , ready(true)
-    , owner(true) {}
-
-template<typename T>
-Array<T>::Array(dim4 dims, Node_ptr n)
-    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
-           (af_dtype)dtype_traits<T>::af_type)
-    , data()
-    , data_dims(dims)
-    , node(n)
-    , ready(false)
-    , owner(true) {}
-
-template<typename T>
-Array<T>::Array(dim4 dims, const T *const in_data)
-    : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
-           (af_dtype)dtype_traits<T>::af_type)
-    , data(bufferAlloc(info.elements() * sizeof(T)), bufferFree)
-    , data_dims(dims)
-    , node(bufferNodePtr<T>())
-    , ready(true)
+    , node()
     , owner(true) {
     static_assert(is_standard_layout<Array<T>>::value,
                   "Array<T> must be a standard layout type");
+    static_assert(std::is_nothrow_move_assignable<Array<T>>::value,
+                  "Array<T> is not move assignable");
+    static_assert(std::is_nothrow_move_constructible<Array<T>>::value,
+                  "Array<T> is not move constructible");
     static_assert(
         offsetof(Array<T>, info) == 0,
         "Array<T>::info must be the first member variable of Array<T>");
@@ -86,18 +128,18 @@ Array<T>::Array(dim4 dims, const T *const in_data)
 }
 
 template<typename T>
-Array<T>::Array(dim4 dims, cl_mem mem, size_t src_offset, bool copy)
+Array<T>::Array(const dim4 &dims, cl_mem mem, size_t src_offset, bool copy)
     : info(getActiveDeviceId(), dims, 0, calcStrides(dims),
-           (af_dtype)dtype_traits<T>::af_type)
-    , data(copy ? bufferAlloc(info.elements() * sizeof(T)) : new Buffer(mem),
-           bufferFree)
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(
+          copy ? memAlloc<T>(info.elements()).release() : new Buffer(mem, true),
+          bufferFree)
     , data_dims(dims)
-    , node(bufferNodePtr<T>())
-    , ready(true)
+    , node()
     , owner(true) {
     if (copy) {
         clRetainMemObject(mem);
-        Buffer src_buf = Buffer((cl_mem)(mem));
+        Buffer src_buf = Buffer(mem);
         getQueue().enqueueCopyBuffer(src_buf, *data.get(), src_offset, 0,
                                      sizeof(T) * info.elements());
     }
@@ -107,11 +149,10 @@ template<typename T>
 Array<T>::Array(const Array<T> &parent, const dim4 &dims, const dim_t &offset_,
                 const dim4 &stride)
     : info(parent.getDevId(), dims, offset_, stride,
-           (af_dtype)dtype_traits<T>::af_type)
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
     , data(parent.getData())
     , data_dims(parent.getDataDims())
-    , node(bufferNodePtr<T>())
-    , ready(true)
+    , node()
     , owner(false) {}
 
 template<typename T>
@@ -122,25 +163,26 @@ Array<T>::Array(Param &tmp, bool owner_)
            0,
            dim4(tmp.info.strides[0], tmp.info.strides[1], tmp.info.strides[2],
                 tmp.info.strides[3]),
-           (af_dtype)dtype_traits<T>::af_type)
-    , data(tmp.data, owner_ ? bufferFree : [](Buffer *) {})
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(
+          tmp.data, owner_ ? bufferFree : [](Buffer * /*unused*/) {})
     , data_dims(dim4(tmp.info.dims[0], tmp.info.dims[1], tmp.info.dims[2],
                      tmp.info.dims[3]))
-    , node(bufferNodePtr<T>())
-    , ready(true)
+    , node()
     , owner(owner_) {}
 
 template<typename T>
-Array<T>::Array(dim4 dims, dim4 strides, dim_t offset_, const T *const in_data,
-                bool is_device)
+Array<T>::Array(const dim4 &dims, const dim4 &strides, dim_t offset_,
+                const T *const in_data, bool is_device)
     : info(getActiveDeviceId(), dims, offset_, strides,
-           (af_dtype)dtype_traits<T>::af_type)
-    , data(is_device ? (new Buffer((cl_mem)in_data))
-                     : (bufferAlloc(info.total() * sizeof(T))),
-           bufferFree)
+           static_cast<af_dtype>(dtype_traits<T>::af_type))
+    , data(
+          is_device
+              ? (new Buffer(reinterpret_cast<cl_mem>(const_cast<T *>(in_data))))
+              : (memAlloc<T>(info.elements()).release()),
+          bufferFree)
     , data_dims(dims)
-    , node(bufferNodePtr<T>())
-    , ready(true)
+    , node()
     , owner(true) {
     if (!is_device) {
         getQueue().enqueueWriteBuffer(*data.get(), CL_TRUE, 0,
@@ -150,10 +192,11 @@ Array<T>::Array(dim4 dims, dim4 strides, dim_t offset_, const T *const in_data,
 
 template<typename T>
 void Array<T>::eval() {
-    if (isReady()) return;
+    if (isReady()) { return; }
 
     this->setId(getActiveDeviceId());
-    data = Buffer_ptr(bufferAlloc(elements() * sizeof(T)), bufferFree);
+    data = std::shared_ptr<cl::Buffer>(memAlloc<T>(info.elements()).release(),
+                                       bufferFree);
 
     // Do not replace this with cast operator
     KParam info = {{dims()[0], dims()[1], dims()[2], dims()[3]},
@@ -162,14 +205,12 @@ void Array<T>::eval() {
 
     Param res = {data.get(), info};
 
-    evalNodes(res, node.get());
-    ready = true;
-    node  = bufferNodePtr<T>();
+    evalNodes(res, getNode().get());
+    node.reset();
 }
 
 template<typename T>
 void Array<T>::eval() const {
-    if (isReady()) return;
     const_cast<Array<T> *>(this)->eval();
 }
 
@@ -187,15 +228,26 @@ void evalMultiple(vector<Array<T> *> arrays) {
     vector<Array<T> *> output_arrays;
     vector<Node *> nodes;
 
+    // Check if all the arrays have the same dimension
+    auto it = std::adjacent_find(begin(arrays), end(arrays),
+                                 [](const Array<T> *l, const Array<T> *r) {
+                                     return l->dims() != r->dims();
+                                 });
+
+    // If they are not the same. eval individually
+    if (it != end(arrays)) {
+        for (auto ptr : arrays) { ptr->eval(); }
+        return;
+    }
+
     for (Array<T> *array : arrays) {
         if (array->isReady()) { continue; }
 
         const ArrayInfo info = array->info;
 
-        array->ready = true;
         array->setId(getActiveDeviceId());
-        array->data =
-            Buffer_ptr(bufferAlloc(info.elements() * sizeof(T)), bufferFree);
+        array->data = std::shared_ptr<cl::Buffer>(
+            memAlloc<T>(info.elements()).release(), bufferFree);
 
         // Do not replace this with cast operator
         KParam kInfo = {
@@ -204,34 +256,31 @@ void evalMultiple(vector<Array<T> *> arrays) {
              info.strides()[3]},
             0};
 
-        Param res = {array->data.get(), kInfo};
-
-        outputs.push_back(res);
+        outputs.emplace_back(array->data.get(), kInfo);
         output_arrays.push_back(array);
-        nodes.push_back(array->node.get());
+        nodes.push_back(array->getNode().get());
     }
+
     evalNodes(outputs, nodes);
-    for (Array<T> *array : output_arrays) { array->node = bufferNodePtr<T>(); }
+
+    for (Array<T> *array : output_arrays) { array->node.reset(); }
 }
 
 template<typename T>
-Array<T>::~Array() {}
-
-template<typename T>
 Node_ptr Array<T>::getNode() {
-    if (node->isBuffer()) {
-        KParam kinfo        = *this;
-        BufferNode *bufNode = reinterpret_cast<BufferNode *>(node.get());
-        unsigned bytes      = this->getDataDims().elements() * sizeof(T);
-        bufNode->setData(kinfo, data, bytes, isLinear());
-    }
-    return node;
+    if (node) { return node; }
+
+    KParam kinfo   = *this;
+    unsigned bytes = this->dims().elements() * sizeof(T);
+    auto nn        = bufferNodePtr<T>();
+    nn->setData(kinfo, data, bytes, isLinear());
+
+    return nn;
 }
 
 template<typename T>
 Node_ptr Array<T>::getNode() const {
-    if (node->isBuffer()) { return const_cast<Array<T> *>(this)->getNode(); }
-    return node;
+    return const_cast<Array<T> *>(this)->getNode();
 }
 
 /// This function should be called after a new JIT node is created. It will
@@ -249,84 +298,92 @@ Node_ptr Array<T>::getNode() const {
 /// 2. The number of parameters we are passing into the kernel exceeds the
 ///    limitation on the platform. For NVIDIA this is 4096 bytes. The
 template<typename T>
-kJITHeuristics passesJitHeuristics(Node *root_node) {
+kJITHeuristics passesJitHeuristics(span<Node *> root_nodes) {
     if (!evalFlag()) { return kJITHeuristics::Pass; }
-    if (root_node->getHeight() >= (int)getMaxJitSize()) { return kJITHeuristics::TreeHeight; }
+    for (const Node *n : root_nodes) {
+        if (n->getHeight() > static_cast<int>(getMaxJitSize())) {
+            return kJITHeuristics::TreeHeight;
+        }
+    }
 
-    size_t alloc_bytes, alloc_buffers;
-    size_t lock_bytes, lock_buffers;
-
-    deviceMemoryInfo(&alloc_bytes, &alloc_buffers, &lock_bytes, &lock_buffers);
-
-    bool isBufferLimit =
-        lock_bytes > getMaxBytes() || lock_buffers > getMaxBuffers();
-    auto platform = getActivePlatform();
+    bool isBufferLimit = getMemoryPressure() >= getMemoryPressureThreshold();
+    auto platform      = getActivePlatform();
 
     // The Apple platform can have the nvidia card or the AMD card
-    bool isNvidia =
-        platform == AFCL_PLATFORM_NVIDIA || platform == AFCL_PLATFORM_APPLE;
-    bool isAmd =
-        platform == AFCL_PLATFORM_AMD || platform == AFCL_PLATFORM_APPLE;
+    bool isIntel = platform == AFCL_PLATFORM_INTEL;
+
+    /// Intels param_size limit is much smaller than the other platforms
+    /// so we need to start checking earlier with smaller trees
+    int heightCheckLimit =
+        isIntel && getDeviceType() == CL_DEVICE_TYPE_GPU ? 3 : 6;
 
     // A lightweight check based on the height of the node. This is
     // an inexpensive operation and does not traverse the JIT tree.
-    bool isParamLimit = (root_node->getHeight() > 6);
-    if (isParamLimit || isBufferLimit) {
+    bool atHeightLimit =
+        std::any_of(std::begin(root_nodes), std::end(root_nodes),
+                    [heightCheckLimit](Node *n) {
+                        return (n->getHeight() + 1 >= heightCheckLimit);
+                    });
+
+    if (atHeightLimit || isBufferLimit) {
         // This is the base parameter size if the kernel had no
         // arguments
-        constexpr size_t base_param_size =
-            sizeof(T *) + sizeof(KParam) + (3 * sizeof(uint));
+        size_t base_param_size =
+            (sizeof(T *) + sizeof(KParam)) * root_nodes.size() +
+            (3 * sizeof(uint));
 
-        // This is the maximum size of the params that can be allowed by the
-        // CUDA platform.
-        constexpr size_t max_nvidia_param_size = (4096 - base_param_size);
-        constexpr size_t max_amd_param_size    = (3520 - base_param_size);
-
-        size_t max_param_size = 0;
-        if (isNvidia) {
-            max_param_size = max_nvidia_param_size;
-        } else if (isAmd) {
-            max_param_size = max_amd_param_size;
-        } else {
-            max_param_size = 8192;
-        }
+        const cl::Device &device = getDevice();
+        size_t max_param_size = device.getInfo<CL_DEVICE_MAX_PARAMETER_SIZE>();
+        // typical values:
+        //   NVIDIA     = 4096
+        //   AMD        = 3520  (AMD A10 iGPU = 1024)
+        //   Intel iGPU = 1024
+        max_param_size -= base_param_size;
 
         struct tree_info {
             size_t total_buffer_size;
             size_t num_buffers;
             size_t param_scalar_size;
         };
-        NodeIterator<> it(root_node);
-        tree_info info =
-            accumulate(it, NodeIterator<>(), tree_info{0, 0, 0},
-                       [](tree_info &prev, Node &n) {
-                           if (n.isBuffer()) {
-                               auto &buf_node = static_cast<BufferNode &>(n);
-                               // getBytes returns the size of the data Array.
-                               // Sub arrays will be represented by their parent
-                               // size.
-                               prev.total_buffer_size += buf_node.getBytes();
-                               prev.num_buffers++;
-                           } else {
-                               prev.param_scalar_size += n.getParamBytes();
-                           }
-                           return prev;
-                       });
-        isBufferLimit = 2 * info.total_buffer_size > lock_bytes;
+
+        tree_info info{0, 0, 0};
+        for (Node *n : root_nodes) {
+            NodeIterator<> it(n);
+            info = accumulate(
+                it, NodeIterator<>(), info, [](tree_info &prev, Node &n) {
+                    if (n.isBuffer()) {
+                        auto &buf_node = static_cast<BufferNode &>(n);
+                        // getBytes returns the size of the data Array.
+                        // Sub arrays will be represented by their parent
+                        // size.
+                        prev.total_buffer_size += buf_node.getBytes();
+                        prev.num_buffers++;
+                    } else {
+                        prev.param_scalar_size += n.getParamBytes();
+                    }
+                    return prev;
+                });
+        }
+        isBufferLimit = jitTreeExceedsMemoryPressure(info.total_buffer_size);
 
         size_t param_size = (info.num_buffers * (sizeof(KParam) + sizeof(T *)) +
                              info.param_scalar_size);
 
-        isParamLimit = param_size >= max_param_size;
+        bool isParamLimit = param_size >= max_param_size;
 
-        if (isParamLimit) {
-            return kJITHeuristics::KernelParameterSize;
-        }
-        if (isBufferLimit) {
-            return kJITHeuristics::MemoryPressure;
-        }
+        if (isParamLimit) { return kJITHeuristics::KernelParameterSize; }
+        if (isBufferLimit) { return kJITHeuristics::MemoryPressure; }
     }
     return kJITHeuristics::Pass;
+}
+
+template<typename T>
+void *getDevicePtr(const Array<T> &arr) {
+    const cl::Buffer *buf = arr.device();
+    if (!buf) { return NULL; }
+    memLock(buf);
+    cl_mem mem = (*buf)();
+    return (void *)mem;
 }
 
 template<typename T>
@@ -342,15 +399,14 @@ Array<T> createSubArray(const Array<T> &parent, const vector<af_seq> &index,
     parent.eval();
 
     dim4 dDims          = parent.getDataDims();
-    dim4 dStrides       = calcStrides(dDims);
     dim4 parent_strides = parent.strides();
 
-    if (dStrides != parent_strides) {
+    if (parent.isLinear() == false) {
         const Array<T> parentCopy = copyArray(parent);
         return createSubArray(parentCopy, index, copy);
     }
 
-    dim4 pDims = parent.dims();
+    const dim4 &pDims = parent.dims();
 
     dim4 dims    = toDims(index, pDims);
     dim4 strides = toStride(index, dDims);
@@ -358,11 +414,11 @@ Array<T> createSubArray(const Array<T> &parent, const vector<af_seq> &index,
     // Find total offsets after indexing
     dim4 offsets = toOffset(index, pDims);
     dim_t offset = parent.getOffset();
-    for (int i = 0; i < 4; i++) offset += offsets[i] * parent_strides[i];
+    for (int i = 0; i < 4; i++) { offset += offsets[i] * parent_strides[i]; }
 
     Array<T> out = Array<T>(parent, dims, offset, strides);
 
-    if (!copy) return out;
+    if (!copy) { return out; }
 
     if (strides[0] != 1 || strides[1] < 0 || strides[2] < 0 || strides[3] < 0) {
         out = copyArray(out);
@@ -372,29 +428,29 @@ Array<T> createSubArray(const Array<T> &parent, const vector<af_seq> &index,
 }
 
 template<typename T>
-Array<T> createHostDataArray(const dim4 &size, const T *const data) {
+Array<T> createHostDataArray(const dim4 &dims, const T *const data) {
     verifyTypeSupport<T>();
-    return Array<T>(size, data);
+    return Array<T>(dims, data);
 }
 
 template<typename T>
-Array<T> createDeviceDataArray(const dim4 &size, void *data) {
+Array<T> createDeviceDataArray(const dim4 &dims, void *data) {
     verifyTypeSupport<T>();
 
     bool copy_device = false;
-    return Array<T>(size, static_cast<cl_mem>(data), 0, copy_device);
+    return Array<T>(dims, static_cast<cl_mem>(data), 0, copy_device);
 }
 
 template<typename T>
-Array<T> createValueArray(const dim4 &size, const T &value) {
+Array<T> createValueArray(const dim4 &dims, const T &value) {
     verifyTypeSupport<T>();
-    return createScalarNode<T>(size, value);
+    return createScalarNode<T>(dims, value);
 }
 
 template<typename T>
-Array<T> createEmptyArray(const dim4 &size) {
+Array<T> createEmptyArray(const dim4 &dims) {
     verifyTypeSupport<T>();
-    return Array<T>(size);
+    return Array<T>(dims);
 }
 
 template<typename T>
@@ -415,8 +471,6 @@ void writeHostDataArray(Array<T> &arr, const T *const data,
 
     getQueue().enqueueWriteBuffer(*arr.get(), CL_TRUE, arr.getOffset(), bytes,
                                   data);
-
-    return;
 }
 
 template<typename T>
@@ -426,20 +480,27 @@ void writeDeviceDataArray(Array<T> &arr, const void *const data,
 
     Buffer &buf = *arr.get();
 
-    clRetainMemObject((cl_mem)(data));
-    Buffer data_buf = Buffer((cl_mem)(data));
+    clRetainMemObject(reinterpret_cast<cl_mem>(const_cast<void *>(data)));
+    Buffer data_buf =
+        Buffer(reinterpret_cast<cl_mem>(const_cast<void *>(data)));
 
-    getQueue().enqueueCopyBuffer(data_buf, buf, 0, (size_t)arr.getOffset(),
-                                 bytes);
-
-    return;
+    getQueue().enqueueCopyBuffer(data_buf, buf, 0,
+                                 static_cast<size_t>(arr.getOffset()), bytes);
 }
 
 template<typename T>
 void Array<T>::setDataDims(const dim4 &new_dims) {
-    modDims(new_dims);
     data_dims = new_dims;
-    if (node->isBuffer()) { node = bufferNodePtr<T>(); }
+    modDims(new_dims);
+}
+
+template<typename T>
+size_t Array<T>::getAllocatedBytes() const {
+    if (!isReady()) { return 0; }
+    size_t bytes = memoryManager().allocated(data.get());
+    // External device pointer
+    if (bytes == 0 && data.get()) { return data_dims.elements() * sizeof(T); }
+    return bytes;
 }
 
 #define INSTANTIATE(T)                                                        \
@@ -453,11 +514,12 @@ void Array<T>::setDataDims(const dim4 &new_dims) {
         const Array<T> &parent, const vector<af_seq> &index, bool copy);      \
     template void destroyArray<T>(Array<T> * A);                              \
     template Array<T> createNodeArray<T>(const dim4 &dims, Node_ptr node);    \
-    template Array<T>::Array(dim4 dims, dim4 strides, dim_t offset,           \
-                             const T *const in_data, bool is_device);         \
-    template Array<T>::Array(dim4 dims, cl_mem mem, size_t src_offset,        \
+    template Array<T>::Array(const dim4 &dims, const dim4 &strides,           \
+                             dim_t offset, const T *const in_data,            \
+                             bool is_device);                                 \
+    template Array<T>::Array(const dim4 &dims, cl_mem mem, size_t src_offset, \
                              bool copy);                                      \
-    template Array<T>::~Array();                                              \
+    template Node_ptr Array<T>::getNode();                                    \
     template Node_ptr Array<T>::getNode() const;                              \
     template void Array<T>::eval();                                           \
     template void Array<T>::eval() const;                                     \
@@ -467,8 +529,10 @@ void Array<T>::setDataDims(const dim4 &new_dims) {
     template void writeDeviceDataArray<T>(                                    \
         Array<T> & arr, const void *const data, const size_t bytes);          \
     template void evalMultiple<T>(vector<Array<T> *> arrays);                 \
-    template kJITHeuristics passesJitHeuristics<T>(Node * node);              \
-    template void Array<T>::setDataDims(const dim4 &new_dims);
+    template kJITHeuristics passesJitHeuristics<T>(span<Node *> node);        \
+    template void *getDevicePtr<T>(const Array<T> &arr);                      \
+    template void Array<T>::setDataDims(const dim4 &new_dims);                \
+    template size_t Array<T>::getAllocatedBytes() const;
 
 INSTANTIATE(float)
 INSTANTIATE(double)

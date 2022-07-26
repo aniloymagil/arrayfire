@@ -210,7 +210,7 @@ typedef enum {
 typedef enum {
     f32,    ///< 32-bit floating point values
     c32,    ///< 32-bit complex floating point values
-    f64,    ///< 64-bit complex floating point values
+    f64,    ///< 64-bit floating point values
     c64,    ///< 64-bit complex floating point values
     b8 ,    ///< 8-bit boolean values
     s32,    ///< 32-bit signed integral values
@@ -277,7 +277,12 @@ typedef enum {
     ///
     /// Out of bound values are clamped to the edge
     ///
-    AF_PAD_CLAMP_TO_EDGE
+    AF_PAD_CLAMP_TO_EDGE,
+
+    ///
+    /// Out of bound values are mapped to range of the dimension in cyclic fashion
+    ///
+    AF_PAD_PERIODIC
 } af_border_type;
 
 typedef enum {
@@ -503,17 +508,20 @@ typedef enum {
 } af_diffusion_eq;
 
 typedef enum {
-    AF_TOPK_MIN     = 1,  ///< Top k min values
-    AF_TOPK_MAX     = 2,  ///< Top k max values
+    AF_TOPK_MIN         = 1,  ///< Top k min values
+    AF_TOPK_MAX         = 2,  ///< Top k max values
+    AF_TOPK_STABLE      = 4,  ///< Preserve order of indices for equal values
+    AF_TOPK_STABLE_MIN  = AF_TOPK_STABLE | AF_TOPK_MIN, ///< Top k min with stable indices
+    AF_TOPK_STABLE_MAX  = AF_TOPK_STABLE | AF_TOPK_MAX, ///< Top k max with stable indices
     AF_TOPK_DEFAULT = 0   ///< Default option (max)
 } af_topk_function;
 #endif
 
 #if AF_API_VERSION >= 37
 typedef enum {
-              AF_VARIANCE_DEFAULT    = 0, ///< Default (Population) variance
-              AF_VARIANCE_SAMPLE     = 1, ///< Sample variance
-              AF_VARIANCE_POPULATION = 2  ///< Population variance
+    AF_VARIANCE_DEFAULT    = 0, ///< Default (Population) variance
+    AF_VARIANCE_SAMPLE     = 1, ///< Sample variance
+    AF_VARIANCE_POPULATION = 2  ///< Population variance
 } af_var_bias;
 
 typedef enum {
@@ -526,6 +534,7 @@ typedef enum {
     AF_INVERSE_DECONV_TIKHONOV       = 1,        ///< Tikhonov Inverse deconvolution
     AF_INVERSE_DECONV_DEFAULT        = 0         ///< Default is Tikhonov deconvolution
 } af_inverse_deconv_algo;
+
 #endif
 
 #if AF_API_VERSION >= 37

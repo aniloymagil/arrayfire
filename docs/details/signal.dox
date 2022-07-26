@@ -46,7 +46,7 @@ factor is calculated internally based on the input data provided.
 \addtogroup arrayfire_func
 @{
 
-\defgroup signal_func_convolve N-Dimensional Convolutions
+\defgroup signal_func_convolve convolve (Non-separable)
 \ingroup convolve_mat
 
 \brief Convolution Integral for any(one through three) dimensional data
@@ -85,7 +85,7 @@ documentation to find out more.
 
 
 
-\defgroup signal_func_convolve_sep Separable 2D Convolution
+\defgroup signal_func_convolve_sep convolve (Separable)
 \ingroup convolve_mat
 
 \brief Separable Convolution
@@ -120,7 +120,7 @@ can be decomposed into two vectors shown below.
 \f$
 
 
-\defgroup signal_func_convolve1 1D Convolutions
+\defgroup signal_func_convolve1 convolve1
 \ingroup convolve_mat
 
 \brief Convolution Integral for one dimensional data
@@ -148,7 +148,7 @@ non-overlapping batch mode, they should satisfy one of the following conditions.
 
 
 
-\defgroup signal_func_convolve2 2D Convolutions
+\defgroup signal_func_convolve2 convolve2
 \ingroup convolve_mat
 
 \brief Convolution Integral for two dimensional data
@@ -179,7 +179,7 @@ below notation.
 
 Given below is an example of no batch mode.
 
-\image html "conv_docs_images/basic.png" "Single 2d convolution with 2d filter"
+\image html "basic.png" "Single 2d convolution with 2d filter"
 
 For input size \dims{M,N,1,1} and filter size \dims{A,B,1,1}, the following set-builder
 notation gives a formal definition of all convolutions performed in this mode.
@@ -191,7 +191,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of filter batch mode.
 
-\image html "conv_docs_images/filter.png" "Single signal convolved with many filters independently"
+\image html "filter.png" "Single signal convolved with many filters independently"
 
 For input size \dims{M,N,1,1} and filter size \dims{A,B,P,1}, the following set-builder
 notation gives a formal definition of all convolutions performed in this mode.
@@ -203,7 +203,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of signal batch mode.
 
-\image html "conv_docs_images/signal.png" "Single filter convolved with many signals independently"
+\image html "signal.png" "Single filter convolved with many signals independently"
 
 For input size \dims{M,N,P,1} and filter size \dims{A,B,1,1}, the following set-builder
 notation gives a formal definition of all convolutions performed in this mode.
@@ -215,7 +215,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of identical batch mode.
 
-\image html "conv_docs_images/identical.png" "Many signals convolved with many filters in one-on-one manner"
+\image html "identical.png" "Many signals convolved with many filters in one-on-one manner"
 
 For input size \dims{M,N,P,Q} and filter size \dims{A,B,P,Q}, the following set-builder
 notation gives a formal definition of all convolutions performed in this mode.
@@ -237,7 +237,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of this batch mode.
 
-\image html "conv_docs_images/non-overlapping_1.png"
+\image html "non-overlapping_1.png"
 
 #### Combination 2
 
@@ -248,7 +248,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of this batch mode.
 
-\image html "conv_docs_images/non-overlapping_2.png"
+\image html "non-overlapping_2.png"
 
 #### Combination 3
 
@@ -259,7 +259,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of this batch mode.
 
-\image html "conv_docs_images/non-overlapping_3.png"
+\image html "non-overlapping_3.png"
 
 #### Combination 4
 
@@ -270,7 +270,7 @@ notation gives a formal definition of all convolutions performed in this mode.
 
 Given below is an example of this batch mode.
 
-\image html "conv_docs_images/non-overlapping_4.png"
+\image html "non-overlapping_4.png"
 
 
 The batching behavior of convolve2NN functions(\ref af_convolve2_nn() and
@@ -290,7 +290,7 @@ convolutional neural networks.
 
 
 
-\defgroup signal_func_convolve3 3D Convolutions
+\defgroup signal_func_convolve3 convolve3
 \ingroup convolve_mat
 
 \brief Convolution Integral for three dimensional data
@@ -373,6 +373,7 @@ respectively, given below are the possible batch operations.
 
 \defgroup signal_func_approx1 approx1
 \ingroup approx_mat
+\brief Interpolation across a single dimension
 
 Performs interpolation on data along a single dimension.
 
@@ -407,6 +408,7 @@ interpolation types.
 
 \defgroup signal_func_approx2 approx2
 \ingroup approx_mat
+\brief Interpolation along two dimensions
 
 Performs interpolation on data along two dimensions.
 

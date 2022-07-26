@@ -27,14 +27,14 @@ Array<T> iir(const Array<T> &b, const Array<T> &a, const Array<T> &x) {
     }
 
     // Extract the first N elements
-    Array<T> c = convolve<T, T, 1, true>(x, b, type);
+    Array<T> c = convolve<T, T>(x, b, type, 1, true);
     dim4 cdims = c.dims();
     cdims[0]   = x.dims()[0];
     c.resetDims(cdims);
 
     int num_a = a.dims()[0];
 
-    if (num_a == 1) return c;
+    if (num_a == 1) { return c; }
 
     dim4 ydims = c.dims();
     Array<T> y = createEmptyArray<T>(ydims);
